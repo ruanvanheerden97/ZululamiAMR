@@ -907,6 +907,42 @@ def page_orders_water():
                        .sort_values(["Order", "Stand"])[["Order", "Section"] + cols].to_csv(index=False).encode(), f"{EST['code']}_water_plan.csv", "text/csv")
 
 
+# =====================================================================
+# DRAWINGS (download the current reticulation SLD PDF set)
+# =====================================================================
+def drawing_files(code):
+    files = glob.glob(os.path.join(HERE, f"{code}_Reticulation_SLD_AMR_*.pdf"))
+    return sorted(files, key=lambda p: re.search(r"(\d{4}-\d{2}-\d{2})", os.path.basename(p)).group(1) if re.search(r"\d{4}-\d{2}-\d{2}", p) else "", reverse=True)
+
+
+def page_drawings():
+    st.header("📐 Reticulation drawings")
+    st.caption("A3 single-line diagrams of the LV reticulation per minisub, with each kiosk and supply coloured by AMR status "
+               "(green = on AMR, amber = ordered, red = still to do, grey = deferred). Sheet 1 is the estate overview.")
+    show = list(ESTATES) if IS_STAFF else [ESTATE]
+    for est in show:
+        code = ESTATES[est]["code"]
+        files = drawing_files(code)
+        with st.container(border=True):
+            st.subheader(est)
+            if not files:
+                st.info("No drawing set issued yet."); continue
+            f = files[0]
+            d = re.search(r"(\d{4}-\d{2}-\d{2})", os.path.basename(f))
+            c1, c2 = st.columns([3, 2])
+            c1.markdown(f"**{os.path.basename(f)}**  \nIssued {d.group(1) if d else '–'} · drawing numbers {code}-SLD-00 onwards")
+            with open(f, "rb") as fh:
+                c2.download_button("⬇️ Download PDF", fh.read(), file_name=os.path.basename(f), mime="application/pdf",
+                                   key=f"dl_{code}", type="primary", width="stretch")
+            if IS_STAFF and len(files) > 1:
+                with st.expander(f"Previous issues ({len(files) - 1})"):
+                    for old in files[1:]:
+                        with open(old, "rb") as fh:
+                            st.download_button(os.path.basename(old), fh.read(), file_name=os.path.basename(old),
+                                               mime="application/pdf", key=f"dl_{os.path.basename(old)}")
+    st.caption("Drawings are reissued by Voltano as installations progress. For a single minisub, see Electricity – minisubs.")
+
+
 # ---------- Navigation (sidebar) ----------
 def staff_ok():
     return IS_STAFF
@@ -921,7 +957,8 @@ pages = [st.Page(page_overview, title="Overview", icon="🏠", default=True),
          st.Page(page_amr, title="Electricity – AMR progress", icon="📡", url_path="electricity-progress"),
          st.Page(page_water, title="Water", icon="💧", url_path="water"),
          st.Page(page_orders, title="Planned installations", icon="📅", url_path="planned"),
-         st.Page(page_lookup, title="Meter lookup", icon="🔎", url_path="lookup")]
+         st.Page(page_lookup, title="Meter lookup", icon="🔎", url_path="lookup"),
+         st.Page(page_drawings, title="Drawings", icon="📐", url_path="drawings")]
 if staff_ok():
     pages.append(st.Page(page_checks, title="Data checks", icon="⚠️", url_path="checks"))
 nav = st.navigation(pages, position="sidebar")

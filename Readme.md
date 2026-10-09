@@ -117,3 +117,8 @@ To change or revoke an HOA's access, edit its line in Secrets and save; the app 
 A login lasts for the browser session (closing the tab or refreshing logs out).
 
 Drawings: `python make_sld.py ZLM` (12 minisubs), `python make_sld.py CC` (MS 04, MS 05), `python make_sld.py SEA`.
+
+## Drawings page
+The **Drawings** page offers the latest `{ZLM|CC|SEA}_Reticulation_SLD_AMR_YYYY-MM-DD.pdf` in the repo for download
+(HOAs see their own estate; staff see all three, plus older issues). To reissue: run `python make_sld.py ZLM` / `CC` / `SEA`,
+commit the new PDF, push and reboot – the newest date is picked up automatically.
