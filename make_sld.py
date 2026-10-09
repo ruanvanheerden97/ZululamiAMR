@@ -20,7 +20,17 @@ TB_H = 30                  # title block height
 
 
 ESTATE = {"code": "ZLM", "name": "ZULULAMI ESTATE"}
-CODES = {"ZLM": "ZULULAMI ESTATE", "SEA": "SEATON ESTATE"}
+CODES = {"ZLM": "ZULULAMI ESTATE", "SEA": "SEATON ESTATE", "CC": "CORAL COVE ESTATE"}
+# Coral Cove has its own HOA but shares the Zululami master workbook: it is MS 04 and MS 05.
+CORAL_MS = ("MS 04", "MS 05")
+WB_CODE = {"CC": "ZLM"}
+
+
+def subset(code, mss):
+    """Minisubs drawn for an estate code."""
+    if code == "CC": return [m for m in mss if m in CORAL_MS]
+    if code == "ZLM": return [m for m in mss if m not in CORAL_MS]
+    return list(mss)
 
 
 def set_estate(path):
@@ -351,7 +361,7 @@ def kiosk_table(ax, ms, kiosks, elec, x0, y0):
 def read_kmz():
     import zipfile, math
     import xml.etree.ElementTree as ET
-    files = glob.glob(os.path.join(HERE, "ZLM Minisubs*.kmz")) if ESTATE["code"] == "ZLM" else []
+    files = glob.glob(os.path.join(HERE, "ZLM Minisubs*.kmz")) if ESTATE["code"] in ("ZLM", "CC") else []
     K = "{http://www.opengis.net/kml/2.2}"
     if not files: return None
     with zipfile.ZipFile(max(files, key=os.path.getmtime)) as z:
@@ -373,12 +383,18 @@ def read_kmz():
 
 def keyplan(ax, elec, mss, x0, y0, x1, y1):
     import math
-    lines = (read_kmz() if glob.glob(os.path.join(HERE, "ZLM Minisubs*.kmz")) and ESTATE["code"] == "ZLM" else None) or []
+    lines = (read_kmz() if glob.glob(os.path.join(HERE, "ZLM Minisubs*.kmz")) and ESTATE["code"] in ("ZLM", "CC") else None) or []
     pts = {}
     for _, m in mss.iterrows():
         try: pts[m["Minisub"]] = (float(m["Longitude"]), float(m["Latitude"]))
         except (TypeError, ValueError): pass
     if not pts: return
+    if ESTATE["code"] == "CC":   # clip the shared Zululami road network to the area around Coral Cove's minisubs
+        b = 0.0045
+        a0, a1 = min(p[0] for p in pts.values()) - b, max(p[0] for p in pts.values()) + b
+        c0, c1 = min(p[1] for p in pts.values()) - b, max(p[1] for p in pts.values()) + b
+        lines = [[p for p in l if a0 <= p[0] <= a1 and c0 <= p[1] <= c1] for l in lines]
+        lines = [l for l in lines if len(l) > 1]
     allp = [p for l in lines for p in l] + list(pts.values())
     lo0, lo1 = min(p[0] for p in allp), max(p[0] for p in allp); la0, la1 = min(p[1] for p in allp), max(p[1] for p in allp)
     kx = math.cos(math.radians((la0 + la1) / 2))
@@ -422,15 +438,23 @@ def overview(pdf, elec, kiosks, mss, nsheets, date):
     vals = ["TOTAL", "", "", "", tot, st.get("Installed", 0), st.get("Ordered", 0), st.get("Outstanding", 0), st.get("Deferred", 0), f"{round(100 * st.get('Installed', 0) / tot)}%"]
     for v, x in zip(vals, xs): ax.text(x, yy, str(v), fontsize=7.5, color=INK, va="center", weight="bold")
     keyplan(ax, elec, mss, 150, M + TB_H + 22, 255, yy - 10)
-    ax.text(M + 10, M + TB_H + 14, "Notes: 1) Supply = one metered connection (1 probe)." + (" 511 Husk (MS 02) added from the AMR export – not in the reticulation sheet." if ESTATE["code"] == "ZLM" else " Future PUD sites are not counted as supplies.") + "  "
+    ax.text(M + 10, M + TB_H + 14, "Notes: 1) Supply = one metered connection (1 probe)." + {"ZLM": " 511 Husk (MS 02) added from the AMR export – not in the reticulation sheet. Coral Cove (MS 04, MS 05) is issued as its own set.",
+                                                                       "CC": " Coral Cove is fed from MS 04 and MS 05 of the Zululami network.",
+                                                                       }.get(ESTATE["code"], " Future PUD sites are not counted as supplies.") + "  "
             "2) Kiosk feeds not stated in the sheet are inferred from the sheet layout (dashed) – verify against as-built SLDs.", fontsize=6, color=INK)
     ax.text(M + 10, M + TB_H + 8, "3) Status colours: green = on AMR, amber = on an open order, red = outstanding, grey = deferred.", fontsize=6, color=INK)
     pg.save()
 
 
-def write_set(target, path, only=None):
+def write_set(target, path, only=None, code=None):
     set_estate(path)
+    if code:
+        ESTATE["code"] = code; ESTATE["name"] = CODES.get(code, code + " ESTATE")
     elec, kiosks, mss = load(path)
+    keep = subset(ESTATE["code"], mss["Minisub"].tolist())
+    mss = mss[mss["Minisub"].isin(keep)].reset_index(drop=True)
+    elec = elec[elec["Minisub"].isin(keep)].reset_index(drop=True)
+    kiosks = kiosks[kiosks["Minisub"].isin(keep)].reset_index(drop=True)
     date = datetime.date.today().strftime("%Y-%m-%d")
     order = sorted(mss["Minisub"].tolist(), key=lambda m: int(m[3:]))
     n = len(order) + 1
@@ -443,16 +467,16 @@ def write_set(target, path, only=None):
         d = pdf.infodict(); d["Title"] = f"{ESTATE['name'].title()} – Reticulation SLDs & AMR status"; d["Author"] = AUTHOR
 
 
-def build_pdf_bytes(path=None, only=None):
+def build_pdf_bytes(path=None, only=None, code=None):
     import io
-    buf = io.BytesIO(); write_set(buf, path or latest_workbook(), only); return buf.getvalue()
+    buf = io.BytesIO(); write_set(buf, path or latest_workbook(WB_CODE.get(code, code or "ZLM")), only, code); return buf.getvalue()
 
 
 def main():
     code = (sys.argv[1] if len(sys.argv) > 1 else "ZLM").upper()
-    path = latest_workbook(code)
+    path = latest_workbook(WB_CODE.get(code, code))
     out = os.path.join(HERE, f"{code}_Reticulation_SLD_AMR_{datetime.date.today():%Y-%m-%d}.pdf")
-    write_set(out, path)
+    write_set(out, path, code=code)
     print(out)
 
 

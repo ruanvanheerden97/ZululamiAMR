@@ -29,14 +29,71 @@ h1, h2, h3 {color:#152B45;}
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # ---------- Estates ----------
+# Coral Cove has its own HOA but shares the Zululami files: it is everything on MS 04 and MS 05.
+CORAL_MS = ("MS 04", "MS 05")
+_ZLM_FILES = dict(wb="ZLM_Meter_Hierarchy_*.xlsx", elec_export="ZLM_AMR_Export_*.xlsx",
+                  water_list="ZLM_ALL_Water_meters_*.csv", water_export="ZLM_Water_AMR_Export_*.xlsx",
+                  stands="Zululami Stands", roads_kmz="ZLM Minisubs*.kmz")
 ESTATES = {
-    "Zululami": dict(code="ZLM", wb="ZLM_Meter_Hierarchy_*.xlsx", elec_export="ZLM_AMR_Export_*.xlsx",
-                     water_list="ZLM_ALL_Water_meters_*.csv", water_export="ZLM_Water_AMR_Export_*.xlsx",
-                     stands="Zululami Stands", roads_kmz="ZLM Minisubs*.kmz", blurb="Zululami and Coral Cove"),
+    "Zululami": dict(code="ZLM", ms_out=CORAL_MS, **_ZLM_FILES),
+    "Coral Cove": dict(code="CC", ms_in=CORAL_MS, **_ZLM_FILES),
     "Seaton": dict(code="SEA", wb="SEA_Meter_Hierarchy_*.xlsx", elec_export=None, device_list="SEA_Device_List_*.csv",
-                   stands="Seaton polygons", roads_kmz=None, blurb="Seaton"),
+                   stands="Seaton polygons", roads_kmz=None),
 }
-ESTATE = st.sidebar.selectbox("🏘️ Estate", list(ESTATES), key="estate")
+
+
+# ---------- Logins ----------
+# Streamlit secrets (Settings → Secrets on Streamlit Cloud, or .streamlit/secrets.toml locally — never commit it):
+#   staff_password = "..."            # Voltano staff: every estate + data checks
+#   [hoa_passwords]
+#   "Zululami" = "..."                # each HOA only sees its own estate
+#   "Coral Cove" = "..."
+#   "Seaton" = "..."
+def _secret(name, default=None):
+    try:
+        return st.secrets.get(name, default)
+    except Exception:
+        return default
+
+
+def check_login(pw):
+    import hmac
+    pw = (pw or "").strip()
+    if not pw: return None
+    staff = str(_secret("staff_password", "") or "")
+    if staff and hmac.compare_digest(pw, staff): return "staff"
+    for est, p in dict(_secret("hoa_passwords", {}) or {}).items():
+        if est in ESTATES and p and hmac.compare_digest(pw, str(p)): return est
+    return None
+
+
+def login_screen():
+    if os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), "voltano_logo.png")):
+        st.image(os.path.join(os.path.dirname(os.path.abspath(__file__)), "voltano_logo.png"), width=220)
+    st.title("Estate Smart Metering Progress")
+    st.caption("Electricity and water AMR progress for estate HOAs. Log in with the password supplied by Voltano.")
+    if not _secret("staff_password") and not _secret("hoa_passwords"):
+        st.error("No logins are set up yet. Add `staff_password` and `[hoa_passwords]` to the app's Secrets.")
+    with st.form("login"):
+        pw = st.text_input("Password", type="password")
+        if st.form_submit_button("Log in", type="primary"):
+            who = check_login(pw)
+            if who:
+                st.session_state["auth"] = who; st.rerun()
+            else:
+                st.error("Incorrect password.")
+    st.stop()
+
+
+AUTH = st.session_state.get("auth")
+if AUTH not in ("staff", *ESTATES):
+    login_screen()
+IS_STAFF = AUTH == "staff"
+if IS_STAFF:
+    ESTATE = st.sidebar.selectbox("🏘️ Estate", list(ESTATES), key="estate")
+else:
+    ESTATE = AUTH
+    st.sidebar.markdown(f"**🏘️ {ESTATE}**")
 EST = ESTATES[ESTATE]
 SITE_NAME = f"{ESTATE} Estate"
 FILE_PATTERN = EST["wb"]
@@ -174,6 +231,21 @@ ref_now = (exp["comms"].max() if exp is not None else elec["comms_dt"].max())
 if pd.isna(ref_now):
     ref_now = pd.Timestamp.now()
 elec["Stale"] = elec["AMR Installed"] & elec["comms_dt"].notna() & ((ref_now - elec["comms_dt"]).dt.days > STALE_DAYS)
+
+
+def ms_keep(ms):
+    if "ms_in" in EST: return ms in EST["ms_in"]
+    if "ms_out" in EST: return ms not in EST["ms_out"]
+    return True
+
+
+elec = elec[elec["Minisub"].map(ms_keep)].reset_index(drop=True)
+kiosks = kiosks[kiosks["Minisub"].map(ms_keep)].reset_index(drop=True)
+mss = mss[mss["Minisub"].map(ms_keep)].reset_index(drop=True)
+if not issues.empty and "Minisub" in issues:
+    issues = issues[issues["Minisub"].map(lambda m: not str(m).startswith("MS") or ms_keep(str(m)))].reset_index(drop=True)
+if not orders.empty and ESTATE == "Coral Cove":
+    orders = orders.iloc[0:0]   # Order 1 (Oct 2026) is for MS 07 / MS 06 – Zululami
 MS_LIST = sorted(mss["Minisub"].tolist(), key=lambda m: int(m[3:]))
 
 # =====================================================================
@@ -251,7 +323,7 @@ def page_sld():
     st.header("⚡ Electricity — minisub reticulation")
     st.caption("Pick a minisub to see its kiosks, every supply and its smart-meter (AMR) status. Tap a kiosk to open its meter list.")
     l, r_ = st.columns([1, 3])
-    ms = l.selectbox("Minisub", MS_LIST, index=MS_LIST.index("MS 07"))
+    ms = l.selectbox("Minisub", MS_LIST, index=MS_LIST.index("MS 07") if "MS 07" in MS_LIST else 0)
     search = r_.text_input("🔍 Highlight stand, kiosk or meter serial", "")
     msr = mss[mss["Minisub"] == ms].iloc[0]
     sel = elec[elec["Minisub"] == ms]; sc = sel["Status"].value_counts()
@@ -280,14 +352,15 @@ def page_sld():
     try:
         import make_sld
         cpdf1, cpdf2 = st.columns(2)
+        k1, k2 = f"pdf_one_{EST['code']}_{ms}", f"pdf_all_{EST['code']}"
         if cpdf1.button(f"📄 Build A3 SLD PDF for {ms}"):
-            st.session_state["pdf_one"] = make_sld.build_pdf_bytes(data_path, only=ms)
-        if "pdf_one" in st.session_state:
-            cpdf1.download_button("Download", st.session_state["pdf_one"], file_name=f"ZLM_SLD_{ms.replace(' ', '')}.pdf", mime="application/pdf")
+            st.session_state[k1] = make_sld.build_pdf_bytes(data_path, only=ms, code=EST["code"])
+        if k1 in st.session_state:
+            cpdf1.download_button("Download", st.session_state[k1], file_name=f"{EST['code']}_SLD_{ms.replace(' ', '')}.pdf", mime="application/pdf")
         if cpdf2.button("📚 Build full drawing set (overview + 14 sheets)"):
-            st.session_state["pdf_all"] = make_sld.build_pdf_bytes(data_path)
-        if "pdf_all" in st.session_state:
-            cpdf2.download_button("Download set", st.session_state["pdf_all"], file_name="ZLM_Reticulation_SLD_AMR.pdf", mime="application/pdf")
+            st.session_state[k2] = make_sld.build_pdf_bytes(data_path, code=EST["code"])
+        if k2 in st.session_state:
+            cpdf2.download_button("Download set", st.session_state[k2], file_name=f"{EST['code']}_Reticulation_SLD_AMR.pdf", mime="application/pdf")
     except Exception as ex:  # drawings are optional in the cloud app
         st.caption(f"PDF drawings unavailable: {ex}")
 
@@ -577,6 +650,10 @@ else:
     wl_path, wx_path = latest(EST["water_list"]), latest(EST["water_export"])
     water, wexp, wdisc = (load_water(wl_path, os.path.getmtime(wl_path), wx_path, os.path.getmtime(wx_path) if wx_path else 0)
                           if wl_path else (pd.DataFrame(), pd.DataFrame(), pd.DataFrame()))
+    if not water.empty:
+        water = water[(water["Development"] == "Coral Cove") == (ESTATE == "Coral Cove")].reset_index(drop=True)
+    if not wdisc.empty:
+        wdisc = wdisc[wdisc["Stand (from label)"].astype(str).str.startswith("CC-") == (ESTATE == "Coral Cove")].reset_index(drop=True)
     elec["Key"] = [stand_key(s, coral=m in ("MS 04", "MS 05")) if s not in ("???", "-") else "" for s, m in zip(elec["Stand / Supply"], elec["Minisub"])]
 stand_kmz = None
 for p in sorted(glob.glob(os.path.join(HERE, "*.kmz")), key=os.path.getmtime, reverse=True):
@@ -587,6 +664,9 @@ for p in sorted(glob.glob(os.path.join(HERE, "*.kmz")), key=os.path.getmtime, re
     except Exception:
         pass
 polys, poly_notes = load_stand_polygons(stand_kmz, os.path.getmtime(stand_kmz), EST["stands"]) if stand_kmz else ([], [])
+if EST["code"] in ("ZLM", "CC"):
+    polys = [p for p in polys if p["key"].startswith("CC-") == (EST["code"] == "CC")]
+    poly_notes = [n for n in poly_notes if (" in 'Coral" in n) == (EST["code"] == "CC")]
 
 
 def pct(a, b):
@@ -599,9 +679,9 @@ def pct(a, b):
 def page_overview():
     st.title(f"{ESTATE} — Smart Metering Progress")
     src = [os.path.basename(exp_path or data_path)]
-    if ESTATE == "Zululami" and latest(EST["water_export"]): src.append(os.path.basename(latest(EST["water_export"])))
+    if EST.get("water_export") and latest(EST["water_export"]): src.append(os.path.basename(latest(EST["water_export"])))
     if EST.get("device_list") and latest(EST["device_list"]): src.append(os.path.basename(latest(EST["device_list"])))
-    st.caption(f"Progress of automatic meter reading (AMR) for electricity and water across {EST['blurb']}. "
+    st.caption(f"Progress of automatic meter reading (AMR) for electricity and water across {ESTATE}. "
                f"Updated from: {', '.join(src)}.")
     cnt = elec["Status"].value_counts(); tot = len(elec)
     st.subheader("⚡ Electricity")
@@ -720,7 +800,8 @@ draw(); const b=L.latLngBounds(P.flatMap(p=>p.r[0])); map.fitBounds(b,{padding:[
     if hasattr(st, "iframe"): st.iframe(page, height=600)
     else: components.html(page, height=600)
     st.caption("Use the ⚡ / 💧 buttons on the map to switch between electricity and water. Tap a stand for its meters. Kiosks, minisub labels, roads and street map can be switched on with the ☰ button. "
-               "Blocks of flats (Marula, Highline, Husk) are coloured by the share of units on AMR. Satellite imagery © Esri.")
+               + ("Blocks of flats (Marula, Highline, Husk) are coloured by the share of units on AMR. " if ESTATE == "Zululami" else "")
+               + "Satellite imagery © Esri.")
 
 
 def page_lookup():
@@ -798,9 +879,10 @@ def water_sections():
 def page_orders_water():
     if water.empty:
         st.info("No water meter list loaded for this estate."); return
-    st.caption("One LoRaWAN water AMR device per water meter that is not on AMR yet. Complexes are their own section; freestanding "
-               "stands" + (" and Coral Cove are" if ESTATE == "Zululami" else " are") + " grouped by the nearest minisub. Sections are "
-               "ranked so the ones closest to finished come first.")
+    grp = ("Units are grouped by the nearest minisub." if ESTATE == "Coral Cove"
+           else "Complexes are their own section; freestanding stands are grouped by the nearest minisub.")
+    st.caption(f"One LoRaWAN water AMR device per water meter that is not on AMR yet. {grp} "
+               "Sections are ranked so the ones closest to finished come first.")
     w = water_sections()
     g = w.groupby("Section").agg(Meters=("Serial", "count"), On_AMR=("AMR Installed", "sum")).reset_index()
     g["To do"] = g["Meters"] - g["On_AMR"]
@@ -827,13 +909,7 @@ def page_orders_water():
 
 # ---------- Navigation (sidebar) ----------
 def staff_ok():
-    try:
-        pw = st.secrets.get("staff_password", "")
-    except Exception:
-        pw = ""
-    if not pw:
-        return False
-    return st.session_state.get("staff_pw", "") == pw
+    return IS_STAFF
 
 
 if os.path.exists(os.path.join(HERE, "voltano_logo.png")):
@@ -851,6 +927,8 @@ if staff_ok():
 nav = st.navigation(pages, position="sidebar")
 with st.sidebar:
     st.divider()
-    st.text_input("Staff password", type="password", key="staff_pw", help="Voltano staff only – unlocks data checks.")
-    if staff_ok(): st.success("Staff pages unlocked")
+    st.caption("Logged in as Voltano staff" if IS_STAFF else f"Logged in: {ESTATE} HOA")
+    if st.button("Log out"):
+        for k in [k for k in st.session_state if k in ("auth", "estate") or str(k).startswith("pdf_")]: st.session_state.pop(k, None)
+        st.rerun()
 nav.run()

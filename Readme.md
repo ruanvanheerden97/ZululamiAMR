@@ -1,4 +1,4 @@
-# Zululami & Seaton Estates — Smart Metering (AMR) Progress App
+# Zululami, Coral Cove & Seaton — Smart Metering (AMR) Progress App
 
 Streamlit app + A3 drawing generator tracking AMR (smart metering) progress across
 Zululami's 14 minisubs, per kiosk and per supply. Same approach as EVG Lake Michelle.
@@ -78,7 +78,7 @@ water `BL A/00/01` = Husk 511-01, `BL A/00/001` = Coral Cove A001). Use the ⚡ 
 to switch utility. Leaflet is bundled in `vendor/` so the map does not depend on a CDN.
 
 ## Estates (Oct 2026)
-The sidebar **Estate** selector switches between Zululami (incl. Coral Cove) and Seaton. Each estate's files are found by prefix:
+Three estates, each with its own HOA: **Zululami**, **Coral Cove** (MS 04 and MS 05 of the Zululami network – it shares the `ZLM_` files and is split out by minisub, and for water by the `CC-` stand key) and **Seaton**. Each estate's files are found by prefix:
 
 | | Zululami (`ZLM_`) | Seaton (`SEA_`) |
 |---|---|---|
@@ -98,3 +98,22 @@ that order would finish (✅) or partly cover (◐). Assumes one LoRaWAN device 
 
 ## Drawings
 `python make_sld.py ZLM` or `python make_sld.py SEA` regenerates that estate's A3 SLD PDF from the latest master workbook.
+
+## Logins
+The app opens on a login screen. Each HOA password shows only that estate; the staff password shows all three
+(with an Estate selector) plus Data checks. Set them in Streamlit Cloud → app → Settings → **Secrets**
+(locally: `.streamlit/secrets.toml`, which is git-ignored – never commit passwords):
+
+```toml
+staff_password = "..."
+
+[hoa_passwords]
+"Zululami" = "..."
+"Coral Cove" = "..."
+"Seaton" = "..."
+```
+
+To change or revoke an HOA's access, edit its line in Secrets and save; the app picks it up straight away.
+A login lasts for the browser session (closing the tab or refreshing logs out).
+
+Drawings: `python make_sld.py ZLM` (12 minisubs), `python make_sld.py CC` (MS 04, MS 05), `python make_sld.py SEA`.
