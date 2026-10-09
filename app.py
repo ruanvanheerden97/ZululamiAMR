@@ -379,41 +379,53 @@ def kmz_lines(path, _mtime):
     return out
 
 with tab_map:
-    import math
     kp = latest("*.kmz")
     lines = kmz_lines(kp, os.path.getmtime(kp)) if kp else []
-    lat0 = float(mss["Latitude"].astype(float).mean()); kx = math.cos(math.radians(lat0)) * 111320; ky = 110540
-    allpts = [(p[0], p[1]) for l in lines for p in l["path"]] + list(zip(kiosks.loc[kiosks["Longitude"] != "", "Longitude"].astype(float), kiosks.loc[kiosks["Latitude"] != "", "Latitude"].astype(float)))
-    lo0 = min(p[0] for p in allpts); la1 = max(p[1] for p in allpts)
-    P = lambda lo, la: ((lo - lo0) * kx, (la1 - la) * ky)
-    Wm = max(P(p[0], p[1])[0] for p in allpts) + 20; Hm = max(P(p[0], p[1])[1] for p in allpts) + 20
-    paths = "".join('<path d="M' + " L".join(f"{P(*q)[0]:.1f},{P(*q)[1]:.1f}" for q in l["path"]) + '"/>' for l in lines)
-    marks = []
+    feats = []
     for _, r in kiosks.iterrows():
         if r["Latitude"] == "" or r["Supplies"] == 0 or r["Kiosk"] == "MS LV board": continue
         e = elec[(elec["Minisub"] == r["Minisub"]) & (elec["Kiosk"] == r["Kiosk"])]; c3 = e["Status"].value_counts().to_dict()
         s_ = "Installed" if c3.get("Installed", 0) == len(e) else ("Ordered" if c3.get("Ordered", 0) else ("Installed" if c3.get("Installed", 0) else ("Deferred" if c3.get("Deferred", 0) == len(e) else "Outstanding")))
-        x, y = P(float(r["Longitude"]), float(r["Latitude"]))
-        marks.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{3 + len(e) ** 0.5 * 1.6:.1f}" fill="{COL[s_]}"><title>{html.escape(r["Minisub"] + " · " + r["Kiosk"])}\n{c3.get("Installed",0)}/{len(e)} on AMR · {s_}</title></circle>'
-                     f'<text class="kl" x="{x + 6:.1f}" y="{y + 3:.1f}">{html.escape(str(r["Kiosk"]).replace("K ", ""))[:14]}</text>')
+        feats.append(dict(t="k", lat=float(r["Latitude"]), lon=float(r["Longitude"]), name=f'{r["Minisub"]} · {r["Kiosk"]}', col=COL[s_], r=5 + len(e) ** 0.5 * 1.5,
+                          info=f'{c3.get("Installed",0)}/{len(e)} on AMR · {c3.get("Ordered",0)} ordered · {c3.get("Outstanding",0)} outstanding',
+                          unit=str(r["Planned AMR Unit"]), dev=str(r["AMR Device(s)"])))
     for _, m in mss.iterrows():
-        e = elec[elec["Minisub"] == m["Minisub"]]; x, y = P(float(m["Longitude"]), float(m["Latitude"]))
+        e = elec[elec["Minisub"] == m["Minisub"]]
         pct = round(100 * (e["Status"] == "Installed").mean()) if len(e) else 0
-        marks.append(f'<rect x="{x-6:.1f}" y="{y-6:.1f}" width="12" height="12" fill="#152B45"><title>{m["Minisub"]}: {pct}% on AMR</title></rect><text class="ml" x="{x+9:.1f}" y="{y-7:.1f}">{m["Minisub"]} · {pct}%</text>')
-    svg = f"""<style>body{{margin:0;font-family:Arial}}svg{{width:100%;height:640px;background:#FBFCFD;border:1px solid #DCD6C4;cursor:grab}}
-    path{{fill:none;stroke:#B9C3CC;stroke-width:1.2;vector-effect:non-scaling-stroke}}circle{{stroke:#fff;stroke-width:1}}
-    .kl{{font-size:7px;fill:#3E5066;paint-order:stroke;stroke:#fff;stroke-width:2px}}.ml{{font-size:13px;font-weight:700;fill:#152B45;paint-order:stroke;stroke:#fff;stroke-width:3px}}
-    .lg{{font-size:12px;color:#152B45;margin:4px 0}}.lg span{{margin-right:14px}}.lg i{{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px}}</style>
-    <div class="lg">{"".join(f'<span><i style="background:{COL[k]}"></i>{k}</span>' for k in STATUS_ORDER)}<span>■ minisub</span><span>scroll to zoom · drag to pan · hover a kiosk</span></div>
-    <svg id="m" viewBox="0 0 {Wm:.0f} {Hm:.0f}"><g>{paths}</g><g>{"".join(marks)}</g></svg>
-    <script>const s=document.getElementById('m');let v=s.getAttribute('viewBox').split(' ').map(Number);const set=()=>s.setAttribute('viewBox',v.join(' '));
-    s.addEventListener('wheel',e=>{{e.preventDefault();const r=s.getBoundingClientRect(),f=e.deltaY>0?1.2:1/1.2,
-    sc=Math.max(v[2]/r.width,v[3]/r.height),cx=v[0]+(e.clientX-r.left)*sc,cy=v[1]+(e.clientY-r.top)*sc;v=[cx-(cx-v[0])*f,cy-(cy-v[1])*f,v[2]*f,v[3]*f];set()}},{{passive:false}});
-    let d=null;s.addEventListener('pointerdown',e=>{{d=[e.clientX,e.clientY,v.slice()]}});window.addEventListener('pointerup',()=>d=null);
-    s.addEventListener('pointermove',e=>{{if(!d)return;const r=s.getBoundingClientRect(),sc=Math.max(v[2]/r.width,v[3]/r.height);v=[d[2][0]-(e.clientX-d[0])*sc,d[2][1]-(e.clientY-d[1])*sc,v[2],v[3]];set()}});</script>"""
-    if hasattr(st, "iframe"): st.iframe(svg, height=700)
-    else: components.html(svg, height=700)
-    st.caption("Kiosk colour = AMR status. Kiosks without a KMZ point are not shown — see Data Checks. Update the map by pushing a newer *.kmz to the repo.")
+        feats.append(dict(t="m", lat=float(m["Latitude"]), lon=float(m["Longitude"]), name=m["Minisub"], pct=pct,
+                          info=f'{(e["Status"]=="Installed").sum()}/{len(e)} on AMR · bulk {m["Bulk Meter Serial"]} ({"on AMR" if m["Bulk on AMR"]=="Yes" else "not on AMR"})'))
+    leaflet = """
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>body{margin:0;font-family:Arial}#map{height:690px;border:1px solid #DCD6C4;border-radius:6px}
+.ms{background:#152B45;color:#fff;font:700 11px Arial;padding:2px 5px;border-radius:3px;white-space:nowrap;border:1px solid #fff}
+.kl{color:#fff;font:600 10px Arial;text-shadow:0 0 3px #000,0 0 2px #000;white-space:nowrap}
+.lg{background:#fff;padding:6px 8px;border-radius:4px;font:12px Arial;line-height:18px}.lg i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px}</style>
+<div id="map"></div><script>
+const F=__FEATS__, L_=__LINES__, COL=__COL__;
+const sat=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:20,maxNativeZoom:19,attribution:'Imagery © Esri, Maxar, Earthstar Geographics'});
+const lbl=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',{maxZoom:20,maxNativeZoom:19});
+const street=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:20,maxNativeZoom:19,attribution:'© OpenStreetMap contributors'});
+const map=L.map('map',{layers:[sat],maxZoom:20});
+const roads=L.layerGroup(L_.map(p=>L.polyline(p.path.map(q=>[q[1],q[0]]),{color:'#ffffff',weight:1,opacity:.55})));
+const kio=L.layerGroup(), labels=L.layerGroup(), msl=L.layerGroup();
+F.forEach(f=>{
+ if(f.t==='k'){L.circleMarker([f.lat,f.lon],{radius:f.r,color:'#fff',weight:1.5,fillColor:f.col,fillOpacity:.95})
+   .bindPopup(`<b>${f.name}</b><br>${f.info}<br>Unit: ${f.unit||'-'}${f.dev?'<br>Device: '+f.dev:''}`).bindTooltip(f.name).addTo(kio);
+   L.marker([f.lat,f.lon],{icon:L.divIcon({className:'kl',html:f.name.split(' · ')[1],iconAnchor:[-9,6]}),interactive:false}).addTo(labels);}
+ else{L.marker([f.lat,f.lon],{icon:L.divIcon({className:'',html:`<div class="ms">${f.name} · ${f.pct}%</div>`,iconAnchor:[0,10]})}).bindPopup(`<b>${f.name}</b><br>${f.info}`).addTo(msl);}
+});
+roads.addTo(map); kio.addTo(map); msl.addTo(map); labels.addTo(map);
+L.control.layers({'Satellite':sat,'Street map':street},{'Place labels':lbl,'Roads / cadastral (KMZ)':roads,'Kiosks':kio,'Kiosk labels':labels,'Minisubs':msl},{collapsed:false}).addTo(map);
+const lg=L.control({position:'bottomleft'});lg.onAdd=()=>{const d=L.DomUtil.create('div','lg');d.innerHTML=Object.entries(COL).map(([k,c])=>`<i style="background:${c}"></i>${k}`).join('<br>');return d};lg.addTo(map);
+const pts=F.map(f=>[f.lat,f.lon]); map.fitBounds(pts,{padding:[30,30]});
+map.on('zoomend',()=>{map.getZoom()>=18?map.addLayer(labels):map.removeLayer(labels)}); if(map.getZoom()<18) map.removeLayer(labels);
+</script>"""
+    leaflet = leaflet.replace("__FEATS__", json.dumps(feats)).replace("__LINES__", json.dumps(lines)).replace("__COL__", json.dumps(COL))
+    if hasattr(st, "iframe"): st.iframe(leaflet, height=710)
+    else: components.html(leaflet, height=710)
+    st.caption("Satellite imagery © Esri (switch to Street map top-right). Kiosk colour = AMR status; click a kiosk or minisub for details. "
+               "Kiosk names show from zoom 18. Kiosks without a KMZ point are not shown — see Data Checks.")
 
 # =====================================================================
 # CHECKS TAB
