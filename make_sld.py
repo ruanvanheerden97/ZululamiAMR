@@ -133,8 +133,9 @@ def frame(pg, title, sub, dwg, sheet, nsheets, date, stats):
     logo = os.path.join(HERE, "voltano_logo.png")
     cw = 62
     if os.path.exists(logo):
-        img = plt.imread(logo); ih, iw = img.shape[:2]; lw = min(cw - 6, (TB_H - 6) * iw / ih); lh = lw * ih / iw
-        ax.imshow(img, extent=(x0 + 3, x0 + 3 + lw, y0 + (TB_H - lh) / 2, y0 + (TB_H + lh) / 2), zorder=5)
+        img = plt.imread(logo); ih, iw = img.shape[:2]; lw = min(cw - 6, (TB_H - 4) * iw / ih); lh = lw * ih / iw
+        lx = x0 + (cw - lw) / 2
+        ax.imshow(img, extent=(lx, lx + lw, y0 + (TB_H - lh) / 2, y0 + (TB_H + lh) / 2), zorder=5, interpolation="antialiased")
     else:
         ax.text(x0 + cw / 2, y0 + TB_H / 2 + 3, "VOLTANO", ha="center", va="center", fontsize=15, weight="bold", color=INK)
         ax.text(x0 + cw / 2, y0 + TB_H / 2 - 5, "METERING", ha="center", va="center", fontsize=9, color=INK, family="DejaVu Sans")
