@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-st.set_page_config(page_title="Zululami — Smart Metering Progress", page_icon="⚡", layout="wide", initial_sidebar_state="auto")
+st.set_page_config(page_title="Estate Smart Metering Progress", page_icon="⚡", layout="wide", initial_sidebar_state="auto")
 
 # ---------- Styling (same palette as the Lake Michelle / Sitari apps) ----------
 st.markdown("""
@@ -28,9 +28,19 @@ h1, h2, h3 {color:#152B45;}
 </style>""", unsafe_allow_html=True)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SITE_NAME = "Zululami Estate"
-FILE_PATTERN = "ZLM_Meter_Hierarchy_*.xlsx"
-AMR_EXPORT_PATTERN = "ZLM_AMR_Export_*.xlsx"     # optional: latest platform export, matched on meter serial
+# ---------- Estates ----------
+ESTATES = {
+    "Zululami": dict(code="ZLM", wb="ZLM_Meter_Hierarchy_*.xlsx", elec_export="ZLM_AMR_Export_*.xlsx",
+                     water_list="ZLM_ALL_Water_meters_*.csv", water_export="ZLM_Water_AMR_Export_*.xlsx",
+                     stands="Zululami Stands", roads_kmz="ZLM Minisubs*.kmz", blurb="Zululami and Coral Cove"),
+    "Seaton": dict(code="SEA", wb="SEA_Meter_Hierarchy_*.xlsx", elec_export=None, device_list="SEA_Device_List_*.csv",
+                   stands="Seaton polygons", roads_kmz=None, blurb="Seaton"),
+}
+ESTATE = st.sidebar.selectbox("🏘️ Estate", list(ESTATES), key="estate")
+EST = ESTATES[ESTATE]
+SITE_NAME = f"{ESTATE} Estate"
+FILE_PATTERN = EST["wb"]
+AMR_EXPORT_PATTERN = EST["elec_export"] or "__no_export__"   # optional: latest platform export, matched on meter serial
 STALE_DAYS = 7
 COL = {"Installed": "#2E7D32", "Ordered": "#E3A008", "Outstanding": "#C0392B", "Deferred": "#8A8F98"}
 STATUS_ORDER = ["Installed", "Ordered", "Outstanding", "Deferred"]
@@ -148,6 +158,16 @@ if exp_path:
     exp = load_amr_export(exp_path, os.path.getmtime(exp_path))
     mss = mss.copy()
     elec, exp_notes = apply_export(elec, mss, exp)
+# Seaton: AMR flags come from the site device list (IsAMR / IsAMR1), matched on serial
+dev_list = None
+if EST.get("device_list"):
+    _dl = latest(EST["device_list"])
+    if _dl:
+        dev_list = pd.read_csv(_dl, dtype=str).fillna("")
+        dev_list["esn"] = dev_list["SerialNumber"].str.replace(r"\s|^M\.E\.S\.", "", regex=True)
+        _on = set(dev_list.loc[dev_list["IsAMR"].str.upper() == "TRUE", "esn"])
+        elec["AMR Installed"] = elec["AMR Installed"] | elec["Meter Serial"].isin(_on)
+        mss = mss.copy(); mss.loc[mss["Bulk Meter Serial"].isin(_on), "Bulk on AMR"] = "Yes"
 elec["Status"] = elec.apply(status_of, axis=1)
 elec["comms_dt"] = elec["AMR Last Comms"].apply(lambda v: parse_comms(v) if v else pd.NaT)
 ref_now = (exp["comms"].max() if exp is not None else elec["comms_dt"].max())
@@ -308,6 +328,14 @@ def page_amr():
 # =====================================================================
 def page_orders():
     st.header("📅 Planned installations")
+    te, tw = st.tabs(["⚡ Electricity", "💧 Water"])
+    with te:
+        page_orders_elec()
+    with tw:
+        page_orders_water()
+
+
+def page_orders_elec():
     st.subheader("Orders")
     if not orders.empty:
         st.dataframe(orders, width="stretch", hide_index=True)
@@ -456,19 +484,19 @@ def load_water(list_path, list_mtime, exp_path, exp_mtime):
 
 
 @st.cache_data(show_spinner=False)
-def load_stand_polygons(path, _mtime):
-    """Stand polygons from the 'Zululami Stands' folder of the estate KMZ (Seaton excluded)."""
+def load_stand_polygons(path, _mtime, folder="Zululami Stands"):
+    """Stand polygons from one estate's folder of the KMZ ('Zululami Stands' or 'Seaton polygons')."""
     K = "{http://www.opengis.net/kml/2.2}"
     with zipfile.ZipFile(path) as z:
         root = ET.fromstring(z.read([n for n in z.namelist() if n.endswith(".kml")][0]))
     cont = (K + "Folder", K + "Document")
-    top = next((e for e in root.iter() if e.tag in cont and (e.findtext(K + "name") or "").strip() == "Zululami Stands"), None)
+    top = next((e for e in root.iter() if e.tag in cont and (e.findtext(K + "name") or "").strip() == folder), None)
     out, notes = [], []
     if top is None:
         return out, notes
     seen = {}
-    for grp in top:
-        if grp.tag not in cont: continue
+    groups = [g for g in top if g.tag in cont] or [top]
+    for grp in groups:
         gname = (grp.findtext(K + "name") or "").strip()
         for pm in grp.iter(K + "Placemark"):
             name = (pm.findtext(K + "name") or "").strip()
@@ -481,6 +509,7 @@ def load_stand_polygons(path, _mtime):
             if gname.startswith("Marula"): key = "BLOCK:1350"
             elif gname.startswith("Highline"): key = "BLOCK:1356"
             elif gname.startswith("Husk"): key = "BLOCK:0511_" + name[-1].upper()
+            elif folder != "Zululami Stands": key = seaton_key(name)
             else: key = stand_key(name, coral=gname.startswith("Coral"))
             if name == "16628": notes.append("Stand polygon named 16628 – treated as 1628.")
             if key in seen: notes.append(f"Stand polygon {name} appears twice in '{gname}' (a neighbouring stand may be mislabelled).")
@@ -515,19 +544,49 @@ def water_stand_status(rows):
     return "Not on AMR yet"
 
 
-wl_path, wx_path = latest(WATER_LIST_PATTERN), latest(WATER_EXPORT_PATTERN)
-water, wexp, wdisc = (load_water(wl_path, os.path.getmtime(wl_path), wx_path, os.path.getmtime(wx_path) if wx_path else 0)
-                      if wl_path else (pd.DataFrame(), pd.DataFrame(), pd.DataFrame()))
-elec["Key"] = [stand_key(s, coral=m in ("MS 04", "MS 05")) if s not in ("???", "-") else "" for s, m in zip(elec["Stand / Supply"], elec["Minisub"])]
+def seaton_key(s):
+    s = str(s or "").strip().upper()
+    if not s or s in ("???", "-"): return ""
+    m = re.fullmatch(r"(\d+)\s*(/\s*DEV)?", s)
+    return str(int(m.group(1))) if m else s
+
+
+def seaton_dev(stand):
+    s = str(stand).upper()
+    if re.match(r"^\d", s): return "Freestanding"
+    if s.startswith(("CONDO", "VILLAS", "EXT H")): return "Condos & villas"
+    return "Common / bulk"
+
+
+def load_water_seaton(dl):
+    w = dl[dl["SerialNumber1"].str.strip() != ""].copy()
+    w["Stand"] = w["Stand"].str.strip(); w["Serial"] = w["SerialNumber1"].str.replace(" ", "")
+    w["AMR Installed"] = w["IsAMR1"].str.upper() == "TRUE"
+    w["AMR Type"] = w["AMR Installed"].map(lambda b: "Sensus (Atom)" if b else "")
+    w["AMR Label"] = ""; w["AMR Last Comms"] = ""; w["Reading"] = ""; w["AMR Device"] = ""
+    w["Key"] = w["Stand"].map(seaton_key); w["Development"] = w["Stand"].map(seaton_dev)
+    w["Occupancy"] = w["Stand-Type"].str.strip()
+    return w
+
+
+wdisc = pd.DataFrame()
+if ESTATE == "Seaton":
+    water = load_water_seaton(dev_list) if dev_list is not None else pd.DataFrame()
+    elec["Key"] = [seaton_key(s) for s in elec["Stand / Supply"]]
+else:
+    wl_path, wx_path = latest(EST["water_list"]), latest(EST["water_export"])
+    water, wexp, wdisc = (load_water(wl_path, os.path.getmtime(wl_path), wx_path, os.path.getmtime(wx_path) if wx_path else 0)
+                          if wl_path else (pd.DataFrame(), pd.DataFrame(), pd.DataFrame()))
+    elec["Key"] = [stand_key(s, coral=m in ("MS 04", "MS 05")) if s not in ("???", "-") else "" for s, m in zip(elec["Stand / Supply"], elec["Minisub"])]
 stand_kmz = None
 for p in sorted(glob.glob(os.path.join(HERE, "*.kmz")), key=os.path.getmtime, reverse=True):
     try:
         with zipfile.ZipFile(p) as z:
-            if b"Zululami Stands" in z.read([n for n in z.namelist() if n.endswith(".kml")][0]):
+            if EST["stands"].encode() in z.read([n for n in z.namelist() if n.endswith(".kml")][0]):
                 stand_kmz = p; break
     except Exception:
         pass
-polys, poly_notes = load_stand_polygons(stand_kmz, os.path.getmtime(stand_kmz)) if stand_kmz else ([], [])
+polys, poly_notes = load_stand_polygons(stand_kmz, os.path.getmtime(stand_kmz), EST["stands"]) if stand_kmz else ([], [])
 
 
 def pct(a, b):
@@ -538,10 +597,12 @@ def pct(a, b):
 # PAGES
 # =====================================================================
 def page_overview():
-    st.title("Zululami — Smart Metering Progress")
-    st.caption("Progress of automatic meter reading (AMR) for electricity and water across Zululami and Coral Cove. "
-               f"Updated from the latest AMR exports ({os.path.basename(exp_path or data_path)}"
-               + (f", {os.path.basename(wx_path)}" if wx_path else "") + ").")
+    st.title(f"{ESTATE} — Smart Metering Progress")
+    src = [os.path.basename(exp_path or data_path)]
+    if ESTATE == "Zululami" and latest(EST["water_export"]): src.append(os.path.basename(latest(EST["water_export"])))
+    if EST.get("device_list") and latest(EST["device_list"]): src.append(os.path.basename(latest(EST["device_list"])))
+    st.caption(f"Progress of automatic meter reading (AMR) for electricity and water across {EST['blurb']}. "
+               f"Updated from: {', '.join(src)}.")
     cnt = elec["Status"].value_counts(); tot = len(elec)
     st.subheader("⚡ Electricity")
     c = st.columns(4)
@@ -599,7 +660,7 @@ LEAFLET_JS, LEAFLET_CSS = _vendor("leaflet.js"), _vendor("leaflet.css")
 
 def page_map():
     st.header("🗺️ Estate map")
-    kp = latest("ZLM Minisubs*.kmz")
+    kp = latest(EST["roads_kmz"]) if EST["roads_kmz"] else None
     lines = kmz_lines(kp, os.path.getmtime(kp)) if kp else []
     ekeys = set(elec["Key"]); wkeys = set(water["Key"]) if not water.empty else set()
     feats = []
@@ -614,11 +675,12 @@ def page_map():
         feats.append(dict(r=p["rings"], n=label, e=SCOL[es], w=SCOL[ws], es=es, ws=ws, ei=einfo, wi=winfo))
     kio = []
     for _, r in kiosks.iterrows():
-        if r["Latitude"] == "" or r["Supplies"] == 0 or r["Kiosk"] == "MS LV board": continue
+        if str(r["Latitude"]).strip() in ("", "nan", "None") or r["Supplies"] == 0 or r["Kiosk"] == "MS LV board": continue
         e = elec[(elec["Minisub"] == r["Minisub"]) & (elec["Kiosk"] == r["Kiosk"])]
         kio.append(dict(lat=float(r["Latitude"]), lon=float(r["Longitude"]), n=f"{r['Minisub']} · {r['Kiosk']}",
                         i=f"{(e['Status']=='Installed').sum()}/{len(e)} on AMR"))
-    msp = [dict(lat=float(m["Latitude"]), lon=float(m["Longitude"]), n=m["Minisub"]) for _, m in mss.iterrows()]
+    msp = [dict(lat=float(m["Latitude"]), lon=float(m["Longitude"]), n=m["Minisub"]) for _, m in mss.iterrows()
+           if str(m["Latitude"]).strip() not in ("", "nan", "None")]
     page = """
 <style>__LCSS__</style><script>__LJS__</script>
 <style>body{margin:0;font-family:Arial,sans-serif}html,body{height:100%}#map{height:100%;min-height:420px;border-radius:8px}
@@ -693,6 +755,74 @@ def page_checks():
         miss_e = sorted({k for k in elec["Key"] if k and k not in pk and not k.startswith(bl)})
         st.write(f"Water stands with no polygon ({len(miss_w)}):", ", ".join(miss_w))
         st.write(f"Electricity supplies with no polygon ({len(miss_e)}):", ", ".join(miss_e))
+
+
+
+
+# =====================================================================
+# WATER PLANNING
+# =====================================================================
+def poly_centroids():
+    cen = {}
+    for p in polys:
+        r = p["rings"][0]
+        cen.setdefault(p["key"], (sum(q[0] for q in r) / len(r), sum(q[1] for q in r) / len(r)))
+    return cen
+
+
+def nearest_ms(lat, lon):
+    best, bd = None, 1e9
+    for _, m in mss.iterrows():
+        try:
+            d = (float(m["Latitude"]) - lat) ** 2 + ((float(m["Longitude"]) - lon) * 0.87) ** 2
+        except (TypeError, ValueError):
+            continue
+        if d < bd: best, bd = m["Minisub"], d
+    return best
+
+
+def water_sections():
+    if water.empty: return water
+    cen = poly_centroids(); w = water.copy()
+    split = {"Freestanding", "Coral Cove"}
+    def sec(r):
+        if r["Development"] not in split:
+            return r["Development"]
+        c = cen.get(r["Key"])
+        if not c: return f"{r['Development']} – no map location"
+        return f"{r['Development']} – near {nearest_ms(*c)}"
+    w["Section"] = w.apply(sec, axis=1)
+    return w
+
+
+def page_orders_water():
+    if water.empty:
+        st.info("No water meter list loaded for this estate."); return
+    st.caption("One LoRaWAN water AMR device per water meter that is not on AMR yet. Complexes are their own section; freestanding "
+               "stands" + (" and Coral Cove are" if ESTATE == "Zululami" else " are") + " grouped by the nearest minisub. Sections are "
+               "ranked so the ones closest to finished come first.")
+    w = water_sections()
+    g = w.groupby("Section").agg(Meters=("Serial", "count"), On_AMR=("AMR Installed", "sum")).reset_index()
+    g["To do"] = g["Meters"] - g["On_AMR"]
+    if "Occupancy" in w:
+        occ = w[(~w["AMR Installed"]) & (w["Occupancy"].str.startswith("Occupied"))].groupby("Section").size()
+        g["Occupied to do"] = g["Section"].map(occ).fillna(0).astype(int)
+    g["% done"] = (100 * g["On_AMR"] / g["Meters"]).round(0).astype(int)
+    g = g[g["To do"] > 0].sort_values(["% done", "To do"], ascending=[False, True]).reset_index(drop=True)
+    tot = int(g["To do"].sum())
+    c = st.columns(3)
+    c[0].metric("Water meters still to put on AMR", tot); c[1].metric("Sections to finish", len(g))
+    n = c[2].number_input("Devices in the next order", min_value=0, value=min(100, tot), step=10, key="w_order")
+    g["Cumulative devices"] = g["To do"].cumsum()
+    g["Next order"] = g.apply(lambda r: "✅ Finish" if r["Cumulative devices"] <= n else ("◐ Part" if r["Cumulative devices"] - r["To do"] < n else ""), axis=1)
+    g.insert(0, "Order", range(1, len(g) + 1))
+    st.dataframe(g.rename(columns={"On_AMR": "On AMR"}), width="stretch", hide_index=True, height=min(60 + 35 * len(g), 640))
+    pick = st.selectbox("Show stands still to do in a section", list(g["Section"]))
+    v = w[(w["Section"] == pick) & (~w["AMR Installed"])]
+    cols = [c_ for c_ in ["Stand", "Serial", "Occupancy"] if c_ in v]
+    st.dataframe(v[cols].sort_values("Stand"), width="stretch", hide_index=True)
+    st.download_button("⬇️ Water installation plan (CSV)", w[~w["AMR Installed"]].merge(g[["Section", "Order"]], on="Section")
+                       .sort_values(["Order", "Stand"])[["Order", "Section"] + cols].to_csv(index=False).encode(), f"{EST['code']}_water_plan.csv", "text/csv")
 
 
 # ---------- Navigation (sidebar) ----------

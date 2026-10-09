@@ -1,4 +1,4 @@
-# Zululami Estate — Smart Metering (AMR) Progress App
+# Zululami & Seaton Estates — Smart Metering (AMR) Progress App
 
 Streamlit app + A3 drawing generator tracking AMR (smart metering) progress across
 Zululami's 14 minisubs, per kiosk and per supply. Same approach as EVG Lake Michelle.
@@ -76,3 +76,25 @@ Seaton is ignored. Stands are matched across the reticulation sheet, water list,
 `zlm_keys.py` (e.g. `505-01` = `0505_01`, `REM 501/01` = `Rem 501_01`, Coral Cove `38` = `038`,
 water `BL A/00/01` = Husk 511-01, `BL A/00/001` = Coral Cove A001). Use the ⚡ / 💧 buttons on the map
 to switch utility. Leaflet is bundled in `vendor/` so the map does not depend on a CDN.
+
+## Estates (Oct 2026)
+The sidebar **Estate** selector switches between Zululami (incl. Coral Cove) and Seaton. Each estate's files are found by prefix:
+
+| | Zululami (`ZLM_`) | Seaton (`SEA_`) |
+|---|---|---|
+| Electricity master | `ZLM_Meter_Hierarchy_*.xlsx` | `SEA_Meter_Hierarchy_*.xlsx` |
+| Electricity AMR | `ZLM_AMR_Export_*.xlsx` (by serial) | `SEA_Device_List_*.csv` → `IsAMR` (by serial) |
+| Water meters / AMR | `ZLM_ALL_Water_meters_*.csv` (`IsAMR1`) + `ZLM_Water_AMR_Export_*.xlsx` (LoRaWAN) | `SEA_Device_List_*.csv` → `IsAMR1` |
+| Stand polygons | KMZ folder "Zululami Stands" | KMZ folder "Seaton polygons" |
+
+To update Seaton, drop a newer `SEA_Device_List_YYYY-MM-DD.csv` in the folder (the latest date is used), push, and reboot.
+Seaton PUD rows (future developments) are not counted as supplies.
+
+## Water planned installations
+Planned installations → 💧 Water splits the remaining water meters into sections:
+complexes are their own section; freestanding stands (and Coral Cove) are grouped by their nearest minisub.
+Sections are ranked closest-to-finished first, and the **Devices in the next order** box shows which sections
+that order would finish (✅) or partly cover (◐). Assumes one LoRaWAN device per water meter not yet on AMR.
+
+## Drawings
+`python make_sld.py ZLM` or `python make_sld.py SEA` regenerates that estate's A3 SLD PDF from the latest master workbook.

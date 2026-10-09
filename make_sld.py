@@ -19,8 +19,17 @@ M = 6                      # frame margin
 TB_H = 30                  # title block height
 
 
-def latest_workbook():
-    files = glob.glob(os.path.join(HERE, "ZLM_Meter_Hierarchy_*.xlsx"))
+ESTATE = {"code": "ZLM", "name": "ZULULAMI ESTATE"}
+CODES = {"ZLM": "ZULULAMI ESTATE", "SEA": "SEATON ESTATE"}
+
+
+def set_estate(path):
+    code = os.path.basename(path)[:3].upper()
+    ESTATE["code"] = code; ESTATE["name"] = CODES.get(code, code + " ESTATE")
+
+
+def latest_workbook(code="ZLM"):
+    files = glob.glob(os.path.join(HERE, f"{code}_Meter_Hierarchy_*.xlsx"))
     if not files:
         sys.exit("No ZLM_Meter_Hierarchy_*.xlsx found next to make_sld.py")
     return max(files, key=os.path.getmtime)
@@ -156,7 +165,7 @@ def frame(pg, title, sub, dwg, sheet, nsheets, date, stats):
     ax.plot([px + pw] * 2, [y0, y0 + TB_H], color=INK, lw=0.8)
     # title
     tx = px + pw; tw = W - M - tx - 120
-    ax.text(tx + 4, y0 + TB_H - 6, "ZULULAMI ESTATE", fontsize=8, color=GRID, weight="bold")
+    ax.text(tx + 4, y0 + TB_H - 6, ESTATE["name"], fontsize=8, color=GRID, weight="bold")
     ax.text(tx + 4, y0 + TB_H - 14, title, fontsize=12, color=INK, weight="bold")
     ax.text(tx + 4, y0 + 9, sub, fontsize=5.6, color=INK)
     ly = y0 + 3.5
@@ -239,7 +248,7 @@ def ms_sheet(pdf, ms, elec, kiosks, mss, sheet, nsheets, date):
     msel = elec[elec["Minisub"] == ms]
     stats = msel["status"].value_counts().to_dict()
     frame(pg, f"{ms} – LV RETICULATION & AMR STATUS", f"{msr['Manufacturer']} · {msr['Rating']} · mfd {msr['Manufacture Date']} · bulk meter {fmt_sn(msr['Bulk Meter Serial'])}"
-          f" ({'on AMR' if msr['Bulk on AMR'] == 'Yes' else 'not on AMR'})", f"ZLM-SLD-{ms[3:]}", sheet, nsheets, date, stats)
+          f" ({'on AMR' if msr['Bulk on AMR'] == 'Yes' else 'not on AMR'})", f"{ESTATE['code']}-SLD-{ms[3:]}", sheet, nsheets, date, stats)
     roots, unconf = build_tree(ms, kiosks, elec)
     direct = msel[msel["Kiosk"] == "MS LV board"]
     MSW = 40
@@ -342,9 +351,9 @@ def kiosk_table(ax, ms, kiosks, elec, x0, y0):
 def read_kmz():
     import zipfile, math
     import xml.etree.ElementTree as ET
-    files = glob.glob(os.path.join(HERE, "*.kmz"))
-    if not files: return None
+    files = glob.glob(os.path.join(HERE, "ZLM Minisubs*.kmz")) if ESTATE["code"] == "ZLM" else []
     K = "{http://www.opengis.net/kml/2.2}"
+    if not files: return None
     with zipfile.ZipFile(max(files, key=os.path.getmtime)) as z:
         root = ET.fromstring(z.read([n for n in z.namelist() if n.endswith(".kml")][0]))
     lines, pts = [], {}
@@ -359,14 +368,17 @@ def read_kmz():
                 elif pt is not None and nm is not None and re.fullmatch(r"MS \d+", nm.text or ""):
                     pts[nm.text] = tuple(map(float, pt.find(K + "coordinates").text.strip().split(",")[:2]))
     walk(root, [])
-    return lines, pts
+    return lines
 
 
 def keyplan(ax, elec, mss, x0, y0, x1, y1):
-    data = read_kmz()
-    if not data: return
     import math
-    lines, pts = data
+    lines = (read_kmz() if glob.glob(os.path.join(HERE, "ZLM Minisubs*.kmz")) and ESTATE["code"] == "ZLM" else None) or []
+    pts = {}
+    for _, m in mss.iterrows():
+        try: pts[m["Minisub"]] = (float(m["Longitude"]), float(m["Latitude"]))
+        except (TypeError, ValueError): pass
+    if not pts: return
     allp = [p for l in lines for p in l] + list(pts.values())
     lo0, lo1 = min(p[0] for p in allp), max(p[0] for p in allp); la0, la1 = min(p[1] for p in allp), max(p[1] for p in allp)
     kx = math.cos(math.radians((la0 + la1) / 2))
@@ -387,7 +399,7 @@ def keyplan(ax, elec, mss, x0, y0, x1, y1):
 def overview(pdf, elec, kiosks, mss, nsheets, date):
     pg = Pg(pdf); ax = pg.ax
     st = elec["status"].value_counts().to_dict()
-    frame(pg, "SITE OVERVIEW – AMR PROGRESS PER MINISUB", "Supplies per minisub from the master hierarchy workbook. Order 1 = MS 07 + MS 06.", "ZLM-SLD-00", 1, nsheets, date, st)
+    frame(pg, "SITE OVERVIEW – AMR PROGRESS PER MINISUB", "Supplies per minisub from the master hierarchy workbook.", f"{ESTATE['code']}-SLD-00", 1, nsheets, date, st)
     cols = ["Minisub", "Rating", "Bulk on AMR", "Kiosks", "Supplies", "Installed", "Ordered", "Outstanding", "Deferred", "% on AMR"]
     xs = [M + 10, 40, 82, 104, 124, 146, 170, 194, 220, 244]
     y = H - M - 20
@@ -410,13 +422,14 @@ def overview(pdf, elec, kiosks, mss, nsheets, date):
     vals = ["TOTAL", "", "", "", tot, st.get("Installed", 0), st.get("Ordered", 0), st.get("Outstanding", 0), st.get("Deferred", 0), f"{round(100 * st.get('Installed', 0) / tot)}%"]
     for v, x in zip(vals, xs): ax.text(x, yy, str(v), fontsize=7.5, color=INK, va="center", weight="bold")
     keyplan(ax, elec, mss, 150, M + TB_H + 22, 255, yy - 10)
-    ax.text(M + 10, M + TB_H + 14, "Notes: 1) Supply = one metered connection (1 probe). 511 Husk (MS 02) added from the AMR export – not in the reticulation sheet.  "
+    ax.text(M + 10, M + TB_H + 14, "Notes: 1) Supply = one metered connection (1 probe)." + (" 511 Husk (MS 02) added from the AMR export – not in the reticulation sheet." if ESTATE["code"] == "ZLM" else " Future PUD sites are not counted as supplies.") + "  "
             "2) Kiosk feeds not stated in the sheet are inferred from the sheet layout (dashed) – verify against as-built SLDs.", fontsize=6, color=INK)
-    ax.text(M + 10, M + TB_H + 8, "3) Status colours: green = on AMR, amber = in Order 1, red = outstanding, grey = deferred (streetlight on MS 06/07 board).", fontsize=6, color=INK)
+    ax.text(M + 10, M + TB_H + 8, "3) Status colours: green = on AMR, amber = on an open order, red = outstanding, grey = deferred.", fontsize=6, color=INK)
     pg.save()
 
 
 def write_set(target, path, only=None):
+    set_estate(path)
     elec, kiosks, mss = load(path)
     date = datetime.date.today().strftime("%Y-%m-%d")
     order = sorted(mss["Minisub"].tolist(), key=lambda m: int(m[3:]))
@@ -427,7 +440,7 @@ def write_set(target, path, only=None):
         for i, ms in enumerate(order):
             if only is None or ms == only:
                 ms_sheet(pdf, ms, elec, kiosks, mss, i + 2, n, date)
-        d = pdf.infodict(); d["Title"] = "Zululami – Reticulation SLDs & AMR status"; d["Author"] = AUTHOR
+        d = pdf.infodict(); d["Title"] = f"{ESTATE['name'].title()} – Reticulation SLDs & AMR status"; d["Author"] = AUTHOR
 
 
 def build_pdf_bytes(path=None, only=None):
@@ -436,8 +449,9 @@ def build_pdf_bytes(path=None, only=None):
 
 
 def main():
-    path = latest_workbook()
-    out = os.path.join(HERE, f"ZLM_Reticulation_SLD_AMR_{datetime.date.today():%Y-%m-%d}.pdf")
+    code = (sys.argv[1] if len(sys.argv) > 1 else "ZLM").upper()
+    path = latest_workbook(code)
+    out = os.path.join(HERE, f"{code}_Reticulation_SLD_AMR_{datetime.date.today():%Y-%m-%d}.pdf")
     write_set(out, path)
     print(out)
 
