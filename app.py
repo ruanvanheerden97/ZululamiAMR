@@ -15,7 +15,6 @@ div[data-testid="stMetric"] * {color:#152B45 !important;}
 div[data-testid="stMetricLabel"], div[data-testid="stMetricLabel"] * {font-size:12px !important;text-transform:uppercase;letter-spacing:.05em;color:#3E5066 !important;}
 div[data-testid="stMetricDelta"], div[data-testid="stMetricDelta"] * {color:#3F7D5C !important;fill:#3F7D5C !important;}
 h1, h2, h3 {color:#152B45;}
-section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] p {color:#152B45;}
 @media (max-width: 640px) {
   .block-container {padding: 3.2rem 0.7rem 2rem !important;}
   div[data-testid="stHorizontalBlock"] {flex-wrap: wrap !important; gap: 0.5rem !important;}

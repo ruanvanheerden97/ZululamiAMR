@@ -1,0 +1,7 @@
+# Fixed light theme so the app looks the same on every phone/PC (dark-mode devices included)
+[theme]
+base = "light"
+primaryColor = "#C0392B"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F1F3F6"
+textColor = "#152B45"
