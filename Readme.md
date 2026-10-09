@@ -1,4 +1,4 @@
-# Zululami Estate — Reticulation & Smart Metering (AMR) Tracker
+# Zululami Estate — Smart Metering (AMR) Progress App
 
 Streamlit app + A3 drawing generator tracking AMR (smart metering) progress across
 Zululami's 14 minisubs, per kiosk and per supply. Same approach as EVG Lake Michelle.
@@ -49,3 +49,30 @@ confirmed against the as-built SLDs and set `Feed Link Basis` to "As-built SLD".
 `python make_sld.py` writes `ZLM_Reticulation_SLD_AMR_<date>.pdf` (A3 landscape, sheet 1 =
 site overview + key plan, sheets 2–15 = MS 01–MS 14). The same drawings can be downloaded from
 the 🗼 Minisub SLD tab. Put `voltano_logo.png` next to the script to show the logo in the title block.
+
+
+## HOA app layout (Oct 2026)
+Sidebar navigation (collapses to the ☰ menu on phones): Overview · Estate map · Electricity – minisubs ·
+Electricity – AMR progress · Water · Planned installations · Meter lookup. **Data checks** is staff-only.
+
+### Staff password
+In Streamlit Cloud: *App → Settings → Secrets* and add
+```
+staff_password = "choose-a-password"
+```
+Locally, copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` (git-ignored).
+Without a password set, the Data checks page stays hidden.
+
+### Water
+- `ZLM_ALL_Water_meters_YYYY-MM-DD.csv` — site list of all water meters (Stand, SerialNumber1, IsAMR1)
+- `ZLM_Water_AMR_Export_YYYY-MM-DD.xlsx` — AMR platform export (SNR, ADDRESS, METER NUMBER, LASTCOMMS, READING)
+A water meter counts as **on AMR** when its serial appears in the latest export (8SEN/SEN and SN
+prefixes are treated as the same serial). Export serials that are not on the site list are listed
+under Data checks → Water.
+
+### Estate map
+Stand polygons come from the KMZ that contains a `Zululami Stands` folder (`ZululamiSeatonCoralCove.kmz`).
+Seaton is ignored. Stands are matched across the reticulation sheet, water list, exports and KMZ by
+`zlm_keys.py` (e.g. `505-01` = `0505_01`, `REM 501/01` = `Rem 501_01`, Coral Cove `38` = `038`,
+water `BL A/00/01` = Husk 511-01, `BL A/00/001` = Coral Cove A001). Use the ⚡ / 💧 buttons on the map
+to switch utility. Leaflet is bundled in `vendor/` so the map does not depend on a CDN.

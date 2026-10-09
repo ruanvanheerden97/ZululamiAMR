@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-st.set_page_config(page_title="Zululami — Reticulation & AMR", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="Zululami — Smart Metering Progress", page_icon="⚡", layout="wide", initial_sidebar_state="auto")
 
 # ---------- Styling (same palette as the Lake Michelle / Sitari apps) ----------
 st.markdown("""
@@ -15,6 +15,17 @@ div[data-testid="stMetric"] * {color:#152B45 !important;}
 div[data-testid="stMetricLabel"], div[data-testid="stMetricLabel"] * {font-size:12px !important;text-transform:uppercase;letter-spacing:.05em;color:#3E5066 !important;}
 div[data-testid="stMetricDelta"], div[data-testid="stMetricDelta"] * {color:#3F7D5C !important;fill:#3F7D5C !important;}
 h1, h2, h3 {color:#152B45;}
+section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] p {color:#152B45;}
+@media (max-width: 640px) {
+  .block-container {padding: 3.2rem 0.7rem 2rem !important;}
+  div[data-testid="stHorizontalBlock"] {flex-wrap: wrap !important; gap: 0.5rem !important;}
+  div[data-testid="stColumn"], div[data-testid="column"] {min-width: calc(50% - 0.5rem) !important; flex: 1 1 calc(50% - 0.5rem) !important; width: calc(50% - 0.5rem) !important;}
+  h1 {font-size: 1.45rem !important; line-height: 1.25 !important;}
+  h2 {font-size: 1.2rem !important;} h3 {font-size: 1.05rem !important;}
+  div[data-testid="stMetric"] {padding: 6px 10px;}
+  div[data-testid="stMetricValue"], div[data-testid="stMetricValue"] * {font-size: 1.35rem !important;}
+  div[data-testid="stMetricLabel"], div[data-testid="stMetricLabel"] * {font-size: 10.5px !important;}
+}
 </style>""", unsafe_allow_html=True)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -146,27 +157,6 @@ if pd.isna(ref_now):
 elec["Stale"] = elec["AMR Installed"] & elec["comms_dt"].notna() & ((ref_now - elec["comms_dt"]).dt.days > STALE_DAYS)
 MS_LIST = sorted(mss["Minisub"].tolist(), key=lambda m: int(m[3:]))
 
-st.title(f"⚡ {SITE_NAME} — Reticulation & Smart Metering (AMR)")
-st.caption(f"Source: `{os.path.basename(data_path)}`" + (f" · AMR export: `{os.path.basename(exp_path)}`" if exp_path else " · no AMR export loaded (using workbook AMR columns)")
-           + " · 14 minisubs · meters keyed on serial number")
-
-# ---------- KPI strip ----------
-cnt = elec["Status"].value_counts()
-tot = len(elec)
-done_ms = sum(1 for m in MS_LIST if len(elec[elec["Minisub"] == m]) and (elec[elec["Minisub"] == m]["Status"].isin(["Installed", "Deferred"])).all())
-c = st.columns(6)
-c[0].metric("Supplies (meter points)", tot, f"{(kiosks['Supplies'] > 0).sum()} kiosks / boards")
-c[1].metric("On AMR", int(cnt.get("Installed", 0)), f"{round(100 * cnt.get('Installed', 0) / tot)}%")
-c[2].metric("Ordered (open orders)", int(cnt.get("Ordered", 0)))
-c[3].metric("Outstanding", int(cnt.get("Outstanding", 0)))
-c[4].metric("Minisubs complete", f"{done_ms} / {len(MS_LIST)}")
-c[5].metric("Bulk meters on AMR", f"{(mss['Bulk on AMR'] == 'Yes').sum()} / {len(mss)}")
-st.divider()
-
-tab_sld, tab_amr, tab_orders, tab_all, tab_map, tab_checks = st.tabs(
-    ["🗼 Minisub SLD", "📡 AMR Progress", "📦 Orders & Next Minisub", "📋 All Supplies", "🗺️ Estate Map", "⚠️ Data Checks"])
-
-
 # =====================================================================
 # SLD TAB
 # =====================================================================
@@ -238,7 +228,9 @@ table{width:100%;border-collapse:collapse;margin:2px 0 4px}td{padding:1px 5px;bo
 .legend{font-size:11px;margin:4px 0 8px}.legend span{margin-right:14px}
 </style>"""
 
-with tab_sld:
+def page_sld():
+    st.header("⚡ Electricity — minisub reticulation")
+    st.caption("Pick a minisub to see its kiosks, every supply and its smart-meter (AMR) status. Tap a kiosk to open its meter list.")
     l, r_ = st.columns([1, 3])
     ms = l.selectbox("Minisub", MS_LIST, index=MS_LIST.index("MS 07"))
     search = r_.text_input("🔍 Highlight stand, kiosk or meter serial", "")
@@ -283,7 +275,8 @@ with tab_sld:
 # =====================================================================
 # AMR PROGRESS TAB
 # =====================================================================
-with tab_amr:
+def page_amr():
+    st.header("📡 Electricity AMR progress")
     st.subheader("Progress per minisub")
     rows = []
     for m in MS_LIST:
@@ -314,7 +307,8 @@ with tab_amr:
 # =====================================================================
 # ORDERS TAB
 # =====================================================================
-with tab_orders:
+def page_orders():
+    st.header("📅 Planned installations")
     st.subheader("Orders")
     if not orders.empty:
         st.dataframe(orders, width="stretch", hide_index=True)
@@ -350,7 +344,7 @@ with tab_orders:
 # =====================================================================
 # ALL SUPPLIES TAB
 # =====================================================================
-with tab_all:
+def page_all_elec():
     f1, f2, f3 = st.columns(3)
     fm = f1.multiselect("Minisub", MS_LIST)
     fs = f2.multiselect("Status", STATUS_ORDER)
@@ -369,6 +363,24 @@ with tab_all:
 # =====================================================================
 # MAP TAB
 # =====================================================================
+# =====================================================================
+# CHECKS TAB
+# =====================================================================
+def page_checks_elec():
+    if not exp_notes.empty:
+        st.subheader("AMR export vs workbook"); st.dataframe(exp_notes, width="stretch", hide_index=True)
+    st.subheader("Kiosk feeds to confirm")
+    st.dataframe(kiosks[kiosks["Feed Link Basis"].astype(str).str.contains("Unconfirmed|Inferred|Assumed")][["Minisub", "Kiosk", "Fed From", "Feed Link Basis", "Source"]],
+                 width="stretch", hide_index=True)
+    st.subheader("Kiosks without a KMZ point")
+    st.dataframe(kiosks[(kiosks["Latitude"] == "") & (kiosks["Supplies"] > 0)][["Minisub", "Kiosk", "Supplies"]], width="stretch", hide_index=True)
+    dup = elec[(elec["Meter Serial"] != "") & elec.duplicated("Meter Serial", keep=False)].sort_values("Meter Serial")
+    st.subheader("Duplicate meter serials")
+    st.dataframe(dup[["Meter Serial", "Minisub", "Kiosk", "Stand / Supply", "Source"]], width="stretch", hide_index=True)
+    st.subheader("Known data issues (from workbook)")
+    if not issues.empty: st.dataframe(issues, width="stretch", hide_index=True)
+
+
 @st.cache_data(show_spinner=False)
 def kmz_lines(path, _mtime):
     K = "{http://www.opengis.net/kml/2.2}"
@@ -386,68 +398,323 @@ def kmz_lines(path, _mtime):
     walk(root, [])
     return out
 
-with tab_map:
-    kp = latest("*.kmz")
-    lines = kmz_lines(kp, os.path.getmtime(kp)) if kp else []
-    feats = []
-    for _, r in kiosks.iterrows():
-        if r["Latitude"] == "" or r["Supplies"] == 0 or r["Kiosk"] == "MS LV board": continue
-        e = elec[(elec["Minisub"] == r["Minisub"]) & (elec["Kiosk"] == r["Kiosk"])]; c3 = e["Status"].value_counts().to_dict()
-        s_ = "Installed" if c3.get("Installed", 0) == len(e) else ("Ordered" if c3.get("Ordered", 0) else ("Installed" if c3.get("Installed", 0) else ("Deferred" if c3.get("Deferred", 0) == len(e) else "Outstanding")))
-        feats.append(dict(t="k", lat=float(r["Latitude"]), lon=float(r["Longitude"]), name=f'{r["Minisub"]} · {r["Kiosk"]}', col=COL[s_], r=5 + len(e) ** 0.5 * 1.5,
-                          info=f'{c3.get("Installed",0)}/{len(e)} on AMR · {c3.get("Ordered",0)} ordered · {c3.get("Outstanding",0)} outstanding',
-                          unit=str(r["Planned AMR Unit"]), dev=str(r["AMR Device(s)"])))
-    for _, m in mss.iterrows():
-        e = elec[elec["Minisub"] == m["Minisub"]]
-        pct = round(100 * (e["Status"] == "Installed").mean()) if len(e) else 0
-        feats.append(dict(t="m", lat=float(m["Latitude"]), lon=float(m["Longitude"]), name=m["Minisub"], pct=pct,
-                          info=f'{(e["Status"]=="Installed").sum()}/{len(e)} on AMR · bulk {m["Bulk Meter Serial"]} ({"on AMR" if m["Bulk on AMR"]=="Yes" else "not on AMR"})'))
-    leaflet = """
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<style>body{margin:0;font-family:Arial}#map{height:690px;border:1px solid #DCD6C4;border-radius:6px}
-.ms{background:#152B45;color:#fff;font:700 11px Arial;padding:2px 5px;border-radius:3px;white-space:nowrap;border:1px solid #fff}
-.kl{color:#fff;font:600 10px Arial;text-shadow:0 0 3px #000,0 0 2px #000;white-space:nowrap}
-.lg{background:#fff;padding:6px 8px;border-radius:4px;font:12px Arial;line-height:18px}.lg i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px}</style>
-<div id="map"></div><script>
-const F=__FEATS__, L_=__LINES__, COL=__COL__;
-const sat=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:20,maxNativeZoom:19,attribution:'Imagery © Esri, Maxar, Earthstar Geographics'});
-const lbl=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',{maxZoom:20,maxNativeZoom:19});
-const street=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:20,maxNativeZoom:19,attribution:'© OpenStreetMap contributors'});
-const map=L.map('map',{layers:[sat],maxZoom:20});
-const roads=L.layerGroup(L_.map(p=>L.polyline(p.path.map(q=>[q[1],q[0]]),{color:'#ffffff',weight:1,opacity:.55})));
-const kio=L.layerGroup(), labels=L.layerGroup(), msl=L.layerGroup();
-F.forEach(f=>{
- if(f.t==='k'){L.circleMarker([f.lat,f.lon],{radius:f.r,color:'#fff',weight:1.5,fillColor:f.col,fillOpacity:.95})
-   .bindPopup(`<b>${f.name}</b><br>${f.info}<br>Unit: ${f.unit||'-'}${f.dev?'<br>Device: '+f.dev:''}`).bindTooltip(f.name).addTo(kio);
-   L.marker([f.lat,f.lon],{icon:L.divIcon({className:'kl',html:f.name.split(' · ')[1],iconAnchor:[-9,6]}),interactive:false}).addTo(labels);}
- else{L.marker([f.lat,f.lon],{icon:L.divIcon({className:'',html:`<div class="ms">${f.name} · ${f.pct}%</div>`,iconAnchor:[0,10]})}).bindPopup(`<b>${f.name}</b><br>${f.info}`).addTo(msl);}
-});
-roads.addTo(map); kio.addTo(map); msl.addTo(map); labels.addTo(map);
-L.control.layers({'Satellite':sat,'Street map':street},{'Place labels':lbl,'Roads / cadastral (KMZ)':roads,'Kiosks':kio,'Kiosk labels':labels,'Minisubs':msl},{collapsed:false}).addTo(map);
-const lg=L.control({position:'bottomleft'});lg.onAdd=()=>{const d=L.DomUtil.create('div','lg');d.innerHTML=Object.entries(COL).map(([k,c])=>`<i style="background:${c}"></i>${k}`).join('<br>');return d};lg.addTo(map);
-const pts=F.map(f=>[f.lat,f.lon]); map.fitBounds(pts,{padding:[30,30]});
-map.on('zoomend',()=>{map.getZoom()>=18?map.addLayer(labels):map.removeLayer(labels)}); if(map.getZoom()<18) map.removeLayer(labels);
-</script>"""
-    leaflet = leaflet.replace("__FEATS__", json.dumps(feats)).replace("__LINES__", json.dumps(lines)).replace("__COL__", json.dumps(COL))
-    if hasattr(st, "iframe"): st.iframe(leaflet, height=710)
-    else: components.html(leaflet, height=710)
-    st.caption("Satellite imagery © Esri (switch to Street map top-right). Kiosk colour = AMR status; click a kiosk or minisub for details. "
-               "Kiosk names show from zoom 18. Kiosks without a KMZ point are not shown — see Data Checks.")
 
 # =====================================================================
-# CHECKS TAB
+# WATER + STAND POLYGONS
 # =====================================================================
-with tab_checks:
-    if not exp_notes.empty:
-        st.subheader("AMR export vs workbook"); st.dataframe(exp_notes, width="stretch", hide_index=True)
-    st.subheader("Kiosk feeds to confirm")
-    st.dataframe(kiosks[kiosks["Feed Link Basis"].astype(str).str.contains("Unconfirmed|Inferred|Assumed")][["Minisub", "Kiosk", "Fed From", "Feed Link Basis", "Source"]],
-                 width="stretch", hide_index=True)
-    st.subheader("Kiosks without a KMZ point")
-    st.dataframe(kiosks[(kiosks["Latitude"] == "") & (kiosks["Supplies"] > 0)][["Minisub", "Kiosk", "Supplies"]], width="stretch", hide_index=True)
-    dup = elec[(elec["Meter Serial"] != "") & elec.duplicated("Meter Serial", keep=False)].sort_values("Meter Serial")
-    st.subheader("Duplicate meter serials")
-    st.dataframe(dup[["Meter Serial", "Minisub", "Kiosk", "Stand / Supply", "Source"]], width="stretch", hide_index=True)
-    st.subheader("Known data issues (from workbook)")
-    if not issues.empty: st.dataframe(issues, width="stretch", hide_index=True)
+from zlm_keys import stand_key, development
+
+WATER_LIST_PATTERN = "ZLM_ALL_Water_meters_*.csv"
+WATER_EXPORT_PATTERN = "ZLM_Water_AMR_Export_*.xlsx"
+SCOL = {"On AMR": "#2E7D32", "Partly on AMR": "#8BC34A", "Planned (ordered)": "#E3A008", "Not on AMR yet": "#C0392B", "No meter yet": "#9AA5B1"}
+
+
+def norm_water_sn(v):
+    s = str(v).strip().upper().replace(" ", "").replace("-", "")
+    s = re.sub(r"^8SEN", "SEN", s)
+    return re.sub(r"^SN", "", s)
+
+
+@st.cache_data(show_spinner=False)
+def load_water(list_path, list_mtime, exp_path, exp_mtime):
+    site = pd.read_csv(list_path, dtype=str).fillna("")
+    site.columns = [c.strip() for c in site.columns]
+    site = site[site["Stand"].str.strip() != ""].copy()
+    site["Stand"] = site["Stand"].str.strip()
+    site["Serial"] = site["SerialNumber1"].str.strip()
+    site["n"] = site["Serial"].map(norm_water_sn)
+    site["Key"] = site["Stand"].map(stand_key)
+    site["Development"] = site["Key"].map(development)
+    ex = pd.DataFrame(columns=["SNR", "ADDRESS", "METER NUMBER", "LASTCOMMS", "READING", "n", "Key"])
+    if exp_path:
+        ex = pd.read_excel(exp_path, dtype=str).fillna("")
+        ex.columns = [str(c).strip().upper() for c in ex.columns]
+        ex = ex[ex["SNR"] != ""].copy()
+        ex["n"] = ex["METER NUMBER"].map(norm_water_sn)
+        ex["Key"] = ex["ADDRESS"].map(stand_key)
+    by = {r["n"]: r for _, r in ex.iterrows()}
+    site["AMR Installed"] = site["n"].isin(by)
+    site["AMR Device"] = site["n"].map(lambda n: by[n]["SNR"] if n in by else "")
+    site["AMR Label"] = site["n"].map(lambda n: by[n]["ADDRESS"] if n in by else "")
+    site["AMR Last Comms"] = site["n"].map(lambda n: by[n]["LASTCOMMS"] if n in by else "")
+    site["Reading"] = site["n"].map(lambda n: by[n]["READING"] if n in by else "")
+    # discrepancy: on AMR (export) but serial not on the site list
+    known = set(site["n"])
+    disc = []
+    for _, r in ex[~ex["n"].isin(known)].iterrows():
+        same = site[site["Key"] == r["Key"]]
+        disc.append({"AMR label": r["ADDRESS"], "Serial on AMR": r["METER NUMBER"], "Stand (from label)": r["Key"],
+                     "Serial on site list for this stand": ", ".join(same["Serial"]) or "— stand not on site list",
+                     "Site list stand": ", ".join(same["Stand"]), "Last comms": r["LASTCOMMS"],
+                     "Likely issue": ("Serial differs from site list (meter swapped or typo)" if len(same) else "Stand missing from site list")})
+    return site, ex, pd.DataFrame(disc)
+
+
+@st.cache_data(show_spinner=False)
+def load_stand_polygons(path, _mtime):
+    """Stand polygons from the 'Zululami Stands' folder of the estate KMZ (Seaton excluded)."""
+    K = "{http://www.opengis.net/kml/2.2}"
+    with zipfile.ZipFile(path) as z:
+        root = ET.fromstring(z.read([n for n in z.namelist() if n.endswith(".kml")][0]))
+    cont = (K + "Folder", K + "Document")
+    top = next((e for e in root.iter() if e.tag in cont and (e.findtext(K + "name") or "").strip() == "Zululami Stands"), None)
+    out, notes = [], []
+    if top is None:
+        return out, notes
+    seen = {}
+    for grp in top:
+        if grp.tag not in cont: continue
+        gname = (grp.findtext(K + "name") or "").strip()
+        for pm in grp.iter(K + "Placemark"):
+            name = (pm.findtext(K + "name") or "").strip()
+            rings = []
+            for pg in pm.iter(K + "Polygon"):
+                c = pg.find(".//" + K + "outerBoundaryIs//" + K + "coordinates")
+                if c is not None:
+                    rings.append([[round(float(p.split(",")[1]), 6), round(float(p.split(",")[0]), 6)] for p in c.text.split()])
+            if not rings: continue
+            if gname.startswith("Marula"): key = "BLOCK:1350"
+            elif gname.startswith("Highline"): key = "BLOCK:1356"
+            elif gname.startswith("Husk"): key = "BLOCK:0511_" + name[-1].upper()
+            else: key = stand_key(name, coral=gname.startswith("Coral"))
+            if name == "16628": notes.append("Stand polygon named 16628 – treated as 1628.")
+            if key in seen: notes.append(f"Stand polygon {name} appears twice in '{gname}' (a neighbouring stand may be mislabelled).")
+            seen[key] = 1
+            out.append(dict(key=key, name=name, group=gname, rings=rings))
+    return out, notes
+
+
+def block_members(key, keys):
+    if key == "BLOCK:1350": return [k for k in keys if k.startswith("1350_")]
+    if key == "BLOCK:1356": return [k for k in keys if k.startswith("1356_")]
+    if key.startswith("BLOCK:0511_"):
+        rng = range(1, 11) if key.endswith("A") else range(11, 25)
+        return [f"0511_{i:02d}" for i in rng]
+    return [key]
+
+
+def elec_stand_status(rows):
+    st_ = list(rows["Status"])
+    if not st_: return "No meter yet"
+    if all(s == "Installed" for s in st_): return "On AMR"
+    if any(s == "Installed" for s in st_): return "Partly on AMR"
+    if any(s == "Ordered" for s in st_): return "Planned (ordered)"
+    if (rows["Meter Serial"] != "").any(): return "Not on AMR yet"
+    return "No meter yet"
+
+
+def water_stand_status(rows):
+    if rows.empty: return "No meter yet"
+    if rows["AMR Installed"].all(): return "On AMR"
+    if rows["AMR Installed"].any(): return "Partly on AMR"
+    return "Not on AMR yet"
+
+
+wl_path, wx_path = latest(WATER_LIST_PATTERN), latest(WATER_EXPORT_PATTERN)
+water, wexp, wdisc = (load_water(wl_path, os.path.getmtime(wl_path), wx_path, os.path.getmtime(wx_path) if wx_path else 0)
+                      if wl_path else (pd.DataFrame(), pd.DataFrame(), pd.DataFrame()))
+elec["Key"] = [stand_key(s, coral=m in ("MS 04", "MS 05")) if s not in ("???", "-") else "" for s, m in zip(elec["Stand / Supply"], elec["Minisub"])]
+stand_kmz = None
+for p in sorted(glob.glob(os.path.join(HERE, "*.kmz")), key=os.path.getmtime, reverse=True):
+    try:
+        with zipfile.ZipFile(p) as z:
+            if b"Zululami Stands" in z.read([n for n in z.namelist() if n.endswith(".kml")][0]):
+                stand_kmz = p; break
+    except Exception:
+        pass
+polys, poly_notes = load_stand_polygons(stand_kmz, os.path.getmtime(stand_kmz)) if stand_kmz else ([], [])
+
+
+def pct(a, b):
+    return f"{round(100 * a / b)}%" if b else "–"
+
+
+# =====================================================================
+# PAGES
+# =====================================================================
+def page_overview():
+    st.title("Zululami — Smart Metering Progress")
+    st.caption("Progress of automatic meter reading (AMR) for electricity and water across Zululami and Coral Cove. "
+               f"Updated from the latest AMR exports ({os.path.basename(exp_path or data_path)}"
+               + (f", {os.path.basename(wx_path)}" if wx_path else "") + ").")
+    cnt = elec["Status"].value_counts(); tot = len(elec)
+    st.subheader("⚡ Electricity")
+    c = st.columns(4)
+    c[0].metric("Meter points", tot)
+    c[1].metric("On AMR", int(cnt.get("Installed", 0)), pct(cnt.get("Installed", 0), tot))
+    c[2].metric("Planned (ordered)", int(cnt.get("Ordered", 0)))
+    c[3].metric("Still to do", int(cnt.get("Outstanding", 0) + cnt.get("Deferred", 0)))
+    st.markdown(bar_html(cnt.to_dict(), tot, 14), unsafe_allow_html=True)
+    if not water.empty:
+        st.subheader("💧 Water")
+        wt = len(water); wi = int(water["AMR Installed"].sum())
+        c = st.columns(4)
+        c[0].metric("Water meters", wt); c[1].metric("On AMR", wi, pct(wi, wt)); c[2].metric("Not on AMR yet", wt - wi)
+        c[3].metric("Developments", water["Development"].nunique())
+        st.markdown(bar_html({"Installed": wi, "Outstanding": wt - wi}, wt, 14), unsafe_allow_html=True)
+    st.subheader("Electricity per minisub")
+    rows = []
+    for m in MS_LIST:
+        e = elec[elec["Minisub"] == m]; c2 = e["Status"].value_counts().to_dict()
+        rows.append(f"<tr><td><b>{m}</b></td><td>{c2.get('Installed',0)}/{len(e)}</td><td style='width:55%'>{bar_html(c2, len(e))}</td></tr>")
+    st.markdown("<table style='width:100%;font-size:14px;border-collapse:collapse'>" + "".join(rows) + "</table>", unsafe_allow_html=True)
+    if not water.empty:
+        st.subheader("Water per development")
+        g = water.groupby("Development").agg(total=("Serial", "count"), on=("AMR Installed", "sum")).sort_values("total", ascending=False)
+        rows = [f"<tr><td><b>{d}</b></td><td>{int(r.on)}/{int(r.total)}</td><td style='width:55%'>{bar_html({'Installed': int(r.on), 'Outstanding': int(r.total - r.on)}, int(r.total))}</td></tr>" for d, r in g.iterrows()]
+        st.markdown("<table style='width:100%;font-size:14px;border-collapse:collapse'>" + "".join(rows) + "</table>", unsafe_allow_html=True)
+    st.caption("Green = on AMR · amber = ordered / planned · red = still to do · grey = deferred.")
+
+
+def page_water():
+    st.header("💧 Water AMR")
+    if water.empty:
+        st.info(f"No water meter list found. Add `{WATER_LIST_PATTERN}` to the repo."); return
+    devs = ["All"] + sorted(water["Development"].unique())
+    d = st.selectbox("Development", devs)
+    v = water if d == "All" else water[water["Development"] == d]
+    wi = int(v["AMR Installed"].sum())
+    c = st.columns(3); c[0].metric("Water meters", len(v)); c[1].metric("On AMR", wi, pct(wi, len(v))); c[2].metric("Not on AMR yet", len(v) - wi)
+    q = st.text_input("🔍 Search stand or serial")
+    if q: v = v[v.apply(lambda r: q.lower() in f"{r['Stand']} {r['Serial']}".lower(), axis=1)]
+    out = v[["Stand", "Development", "Serial", "AMR Installed", "AMR Label", "AMR Last Comms", "Reading"]].rename(columns={"AMR Installed": "On AMR"})
+    st.dataframe(out.sort_values(["Development", "Stand"]), width="stretch", hide_index=True, height=520)
+
+
+def _vendor(name):
+    try:
+        return open(os.path.join(HERE, "vendor", name), encoding="utf-8").read()
+    except OSError:
+        return ""
+
+
+LEAFLET_JS, LEAFLET_CSS = _vendor("leaflet.js"), _vendor("leaflet.css")
+
+
+def page_map():
+    st.header("🗺️ Estate map")
+    kp = latest("ZLM Minisubs*.kmz")
+    lines = kmz_lines(kp, os.path.getmtime(kp)) if kp else []
+    ekeys = set(elec["Key"]); wkeys = set(water["Key"]) if not water.empty else set()
+    feats = []
+    for p in polys:
+        mem = block_members(p["key"], ekeys | wkeys)
+        er = elec[elec["Key"].isin(mem)]
+        wr = water[water["Key"].isin(mem)] if not water.empty else pd.DataFrame()
+        es, ws = elec_stand_status(er), water_stand_status(wr)
+        label = p["name"] if not p["key"].startswith("BLOCK:") else f"{p['group']} {p['name']}"
+        einfo = "<br>".join(f"{html.escape(str(r['Stand / Supply']))}: {r['Status']}" for _, r in er.head(14).iterrows()) or "No electricity meter yet"
+        winfo = "<br>".join(f"{html.escape(r['Stand'])}: {'on AMR' if r['AMR Installed'] else 'not on AMR'}" for _, r in wr.head(14).iterrows()) if len(wr) else "No water meter on record"
+        feats.append(dict(r=p["rings"], n=label, e=SCOL[es], w=SCOL[ws], es=es, ws=ws, ei=einfo, wi=winfo))
+    kio = []
+    for _, r in kiosks.iterrows():
+        if r["Latitude"] == "" or r["Supplies"] == 0 or r["Kiosk"] == "MS LV board": continue
+        e = elec[(elec["Minisub"] == r["Minisub"]) & (elec["Kiosk"] == r["Kiosk"])]
+        kio.append(dict(lat=float(r["Latitude"]), lon=float(r["Longitude"]), n=f"{r['Minisub']} · {r['Kiosk']}",
+                        i=f"{(e['Status']=='Installed').sum()}/{len(e)} on AMR"))
+    msp = [dict(lat=float(m["Latitude"]), lon=float(m["Longitude"]), n=m["Minisub"]) for _, m in mss.iterrows()]
+    page = """
+<style>__LCSS__</style><script>__LJS__</script>
+<style>body{margin:0;font-family:Arial,sans-serif}html,body{height:100%}#map{height:100%;min-height:420px;border-radius:8px}
+.leaflet-control-layers-toggle{background-image:none!important;width:36px!important;height:36px!important;display:flex!important;align-items:center;justify-content:center;font-size:20px;color:#152B45;text-decoration:none}
+.leaflet-control-layers-toggle::after{content:'☰'}
+.tg{display:flex;gap:0;background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.35)}
+.tg button{border:0;padding:9px 14px;font:600 14px Arial;background:#fff;color:#152B45;cursor:pointer}
+.tg button.on{background:#152B45;color:#fff}
+.lg{background:#fff;padding:7px 9px;border-radius:6px;font:12px Arial;line-height:19px;box-shadow:0 1px 4px rgba(0,0,0,.3)}
+.lg i{display:inline-block;width:12px;height:12px;border-radius:2px;margin-right:6px;vertical-align:-2px}
+.ms{background:#152B45;color:#fff;font:700 11px Arial;padding:2px 5px;border-radius:3px;white-space:nowrap;border:1px solid #fff}</style>
+<div id="map"></div><script>
+const P=__P__, KI=__K__, MS=__M__, L_=__L__, SC=__SC__;
+const sat=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:20,maxNativeZoom:19,attribution:'Imagery © Esri'});
+const street=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:20,maxNativeZoom:19,attribution:'© OpenStreetMap'});
+const map=L.map('map',{layers:[sat],maxZoom:20,tap:true});
+let mode='e'; const stands=L.layerGroup().addTo(map);
+function draw(){stands.clearLayers();P.forEach(p=>{const c=mode==='e'?p.e:p.w, s=mode==='e'?p.es:p.ws;
+  L.polygon(p.r,{color:c,weight:1.2,fillColor:c,fillOpacity:s==='No meter yet'?0.12:0.55})
+   .bindPopup(`<b>${p.n}</b><br><i>${s}</i><hr style="margin:4px 0">${mode==='e'?p.ei:p.wi}`).addTo(stands)});
+  }
+const kios=L.layerGroup(KI.map(k=>L.circleMarker([k.lat,k.lon],{radius:5,color:'#fff',weight:1.5,fillColor:'#152B45',fillOpacity:.95}).bindPopup(`<b>${k.n}</b><br>${k.i}`)));
+const roads=L.layerGroup(L_.map(p=>L.polyline(p.path.map(q=>[q[1],q[0]]),{color:'#fff',weight:1,opacity:.5})));
+const msl=L.layerGroup(MS.map(m=>L.marker([m.lat,m.lon],{icon:L.divIcon({className:'',html:`<div class="ms">${m.n}</div>`,iconAnchor:[0,10]})}))).addTo(map);
+L.control.layers({'Satellite':sat,'Street map':street},{'Kiosks':kios,'Minisubs':msl,'Roads (KMZ)':roads},{collapsed:true}).addTo(map);
+const tg=L.control({position:'topleft'});tg.onAdd=()=>{const d=L.DomUtil.create('div','tg');
+  d.innerHTML='<button id="be" class="on">⚡ Electricity</button><button id="bw">💧 Water</button>';
+  L.DomEvent.disableClickPropagation(d);
+  d.querySelector('#be').onclick=()=>{mode='e';d.querySelector('#be').classList.add('on');d.querySelector('#bw').classList.remove('on');draw()};
+  d.querySelector('#bw').onclick=()=>{mode='w';d.querySelector('#bw').classList.add('on');d.querySelector('#be').classList.remove('on');draw()};return d};tg.addTo(map);
+const lg=L.control({position:'bottomleft'});lg.onAdd=()=>{const d=L.DomUtil.create('div','lg');d.innerHTML=Object.entries(SC).map(([k,c])=>`<i style="background:${c}"></i>${k}`).join('<br>');return d};lg.addTo(map);
+draw(); const b=L.latLngBounds(P.flatMap(p=>p.r[0])); map.fitBounds(b,{padding:[10,10]});
+</script>"""
+    page = (page.replace("__P__", json.dumps(feats)).replace("__K__", json.dumps(kio)).replace("__M__", json.dumps(msp))
+            .replace("__L__", json.dumps(lines)).replace("__SC__", json.dumps(SCOL)))
+    page = page.replace("__LCSS__", LEAFLET_CSS).replace("__LJS__", LEAFLET_JS)
+    if hasattr(st, "iframe"): st.iframe(page, height=600)
+    else: components.html(page, height=600)
+    st.caption("Use the ⚡ / 💧 buttons on the map to switch between electricity and water. Tap a stand for its meters. Kiosks, minisub labels, roads and street map can be switched on with the ☰ button. "
+               "Blocks of flats (Marula, Highline, Husk) are coloured by the share of units on AMR. Satellite imagery © Esri.")
+
+
+def page_lookup():
+    st.header("🔎 Meter lookup")
+    t1, t2 = st.tabs(["⚡ Electricity", "💧 Water"])
+    with t1:
+        page_all_elec()
+    with t2:
+        if water.empty: st.info("No water list loaded.")
+        else:
+            q = st.text_input("Search stand or serial", key="wq")
+            v = water if not q else water[water.apply(lambda r: q.lower() in f"{r['Stand']} {r['Serial']}".lower(), axis=1)]
+            st.dataframe(v[["Stand", "Development", "Serial", "AMR Installed", "AMR Last Comms"]], width="stretch", hide_index=True, height=520)
+
+
+def page_checks():
+    st.header("⚠️ Data checks (staff)")
+    t1, t2, t3 = st.tabs(["💧 Water", "⚡ Electricity", "🗺️ Stand map"])
+    with t1:
+        st.subheader("Water meters on AMR whose serial is not on the site list")
+        st.caption("Matched on meter serial. These meters report on the AMR platform, but the serial is not in the site water-meter list.")
+        if wdisc.empty: st.success("None — every AMR water serial is on the site list.")
+        else: st.dataframe(wdisc, width="stretch", hide_index=True)
+    with t2:
+        page_checks_elec()
+    with t3:
+        st.subheader("Stand map issues")
+        for n in poly_notes: st.write("• " + n)
+        pk = {p["key"] for p in polys}
+        bl = ("1350_", "1356_", "0511_")
+        miss_w = sorted({k for k in water["Key"] if k and k not in pk and not k.startswith(bl)}) if not water.empty else []
+        miss_e = sorted({k for k in elec["Key"] if k and k not in pk and not k.startswith(bl)})
+        st.write(f"Water stands with no polygon ({len(miss_w)}):", ", ".join(miss_w))
+        st.write(f"Electricity supplies with no polygon ({len(miss_e)}):", ", ".join(miss_e))
+
+
+# ---------- Navigation (sidebar) ----------
+def staff_ok():
+    try:
+        pw = st.secrets.get("staff_password", "")
+    except Exception:
+        pw = ""
+    if not pw:
+        return False
+    return st.session_state.get("staff_pw", "") == pw
+
+
+if os.path.exists(os.path.join(HERE, "voltano_logo.png")):
+    st.logo(os.path.join(HERE, "voltano_logo.png"), size="large")
+
+pages = [st.Page(page_overview, title="Overview", icon="🏠", default=True),
+         st.Page(page_map, title="Estate map", icon="🗺️", url_path="map"),
+         st.Page(page_sld, title="Electricity – minisubs", icon="⚡", url_path="electricity"),
+         st.Page(page_amr, title="Electricity – AMR progress", icon="📡", url_path="electricity-progress"),
+         st.Page(page_water, title="Water", icon="💧", url_path="water"),
+         st.Page(page_orders, title="Planned installations", icon="📅", url_path="planned"),
+         st.Page(page_lookup, title="Meter lookup", icon="🔎", url_path="lookup")]
+if staff_ok():
+    pages.append(st.Page(page_checks, title="Data checks", icon="⚠️", url_path="checks"))
+nav = st.navigation(pages, position="sidebar")
+with st.sidebar:
+    st.divider()
+    st.text_input("Staff password", type="password", key="staff_pw", help="Voltano staff only – unlocks data checks.")
+    if staff_ok(): st.success("Staff pages unlocked")
+nav.run()
