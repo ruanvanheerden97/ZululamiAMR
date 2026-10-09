@@ -93,6 +93,13 @@ def apply_export(elec, mss, exp):
                 notes.append({"Type": "Newly on AMR", "Minisub": r["Minisub"], "Kiosk": r["Kiosk"], "Stand": r["Stand / Supply"], "Serial": r["Meter Serial"], "Detail": a["ADDRESS"]})
             e.at[i, "AMR Installed"] = True; e.at[i, "AMR Device"] = a["device"]; e.at[i, "AMR Port"] = a["port"]
             e.at[i, "AMR Label"] = a["ADDRESS"]; e.at[i, "AMR Last Comms"] = a["LASTCOMMS"]
+    # minisub bulk meters: mark as on AMR when their serial is in the export
+    for i, m in mss.iterrows():
+        a = by_sn.get(m["Bulk Meter Serial"])
+        if a is not None and m["Bulk Meter Serial"]:
+            if m["Bulk on AMR"] != "Yes":
+                notes.append({"Type": "Bulk meter newly on AMR", "Minisub": m["Minisub"], "Kiosk": "", "Stand": "Bulk", "Serial": m["Bulk Meter Serial"], "Detail": a["ADDRESS"]})
+            mss.at[i, "Bulk on AMR"] = "Yes"; mss.at[i, "Bulk AMR Device"] = a["device"]; mss.at[i, "Bulk Last Comms"] = a["LASTCOMMS"]
     known = set(e["Meter Serial"]) | set(mss["Bulk Meter Serial"])
     for _, a in exp.iterrows():
         if a["serial"] not in known:
@@ -129,6 +136,7 @@ exp_notes = pd.DataFrame()
 exp = None
 if exp_path:
     exp = load_amr_export(exp_path, os.path.getmtime(exp_path))
+    mss = mss.copy()
     elec, exp_notes = apply_export(elec, mss, exp)
 elec["Status"] = elec.apply(status_of, axis=1)
 elec["comms_dt"] = elec["AMR Last Comms"].apply(lambda v: parse_comms(v) if v else pd.NaT)
