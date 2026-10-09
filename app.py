@@ -432,7 +432,13 @@ def load_water(list_path, list_mtime, exp_path, exp_mtime):
         ex["n"] = ex["METER NUMBER"].map(norm_water_sn)
         ex["Key"] = ex["ADDRESS"].map(stand_key)
     by = {r["n"]: r for _, r in ex.iterrows()}
-    site["AMR Installed"] = site["n"].isin(by)
+    # On AMR = active on the site list (IsAMR1, covers Sensus meters not in the LoRaWAN export)
+    #          OR present in the LoRaWAN AMR export (matched on serial)
+    amr_col = next((c for c in site.columns if c.lower().startswith("isamr")), None)
+    flag = site[amr_col].astype(str).str.strip().str.upper().isin(["TRUE", "YES", "1"]) if amr_col else False
+    in_exp = site["n"].isin(by)
+    site["AMR Installed"] = flag | in_exp
+    site["AMR Type"] = [("LoRaWAN" if e else ("Sensus / other (site list)" if f else "")) for e, f in zip(in_exp, flag if amr_col else [False] * len(site))]
     site["AMR Device"] = site["n"].map(lambda n: by[n]["SNR"] if n in by else "")
     site["AMR Label"] = site["n"].map(lambda n: by[n]["ADDRESS"] if n in by else "")
     site["AMR Last Comms"] = site["n"].map(lambda n: by[n]["LASTCOMMS"] if n in by else "")
@@ -569,6 +575,7 @@ def page_water():
     st.header("💧 Water AMR")
     if water.empty:
         st.info(f"No water meter list found. Add `{WATER_LIST_PATTERN}` to the repo."); return
+    st.caption("A water meter is on AMR when the site meter list marks it AMR-active (Sensus meters) or it reports on the LoRaWAN AMR platform.")
     devs = ["All"] + sorted(water["Development"].unique())
     d = st.selectbox("Development", devs)
     v = water if d == "All" else water[water["Development"] == d]
@@ -576,7 +583,7 @@ def page_water():
     c = st.columns(3); c[0].metric("Water meters", len(v)); c[1].metric("On AMR", wi, pct(wi, len(v))); c[2].metric("Not on AMR yet", len(v) - wi)
     q = st.text_input("🔍 Search stand or serial")
     if q: v = v[v.apply(lambda r: q.lower() in f"{r['Stand']} {r['Serial']}".lower(), axis=1)]
-    out = v[["Stand", "Development", "Serial", "AMR Installed", "AMR Label", "AMR Last Comms", "Reading"]].rename(columns={"AMR Installed": "On AMR"})
+    out = v[["Stand", "Development", "Serial", "AMR Installed", "AMR Type", "AMR Label", "AMR Last Comms", "Reading"]].rename(columns={"AMR Installed": "On AMR"})
     st.dataframe(out.sort_values(["Development", "Stand"]), width="stretch", hide_index=True, height=520)
 
 
@@ -664,7 +671,7 @@ def page_lookup():
         else:
             q = st.text_input("Search stand or serial", key="wq")
             v = water if not q else water[water.apply(lambda r: q.lower() in f"{r['Stand']} {r['Serial']}".lower(), axis=1)]
-            st.dataframe(v[["Stand", "Development", "Serial", "AMR Installed", "AMR Last Comms"]], width="stretch", hide_index=True, height=520)
+            st.dataframe(v[["Stand", "Development", "Serial", "AMR Installed", "AMR Type", "AMR Last Comms"]], width="stretch", hide_index=True, height=520)
 
 
 def page_checks():
